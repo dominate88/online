@@ -1,3 +1,6 @@
+hello-world.odt
+/usr/bin/chromium 
+
 <p align="right"><a href="#gitpod"><img alt="Open in Gitpod" src="https://gitpod.io/button/open-in-gitpod.svg"></a></p>
 
 # Collabora Online
