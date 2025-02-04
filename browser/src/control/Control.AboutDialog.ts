@@ -87,12 +87,12 @@ class AboutDialog {
 			productName = windowAny.MobileAppName;
 		} else {
 			productName =
-				typeof brandProductName !== 'undefined'
+				typeof brandProductName === 'string' && brandProductName.length > 0
 					? brandProductName
 					: 'Collabora Online Development Edition (unbranded)';
 		}
 		var productURL =
-			typeof brandProductURL !== 'undefined'
+			typeof brandProductURL === 'string' && brandProductURL.length > 0
 				? brandProductURL
 				: 'https://collaboraonline.github.io/';
 
@@ -198,7 +198,7 @@ class AboutDialog {
 		if (e.key === 'd') {
 			this.map._debug.toggle();
 		} else if (e.key === 'l') {
-			// L toggges the Online logging level between the default (whatever
+			// L toggles the Online logging level between the default (whatever
 			// is set in coolwsd.xml or on the coolwsd command line) and the
 			// most verbose a client is allowed to set (which also can be set in
 			// coolwsd.xml or on the coolwsd command line).

@@ -1362,7 +1362,7 @@ class CanvasSectionContainer {
 		newWidth = Math.floor(newWidth * app.dpiScale);
 		newHeight = Math.floor(newHeight * app.dpiScale);
 
-		if (this.right === newWidth && this.bottom === newHeight)
+		if (this.right === newWidth && this.bottom === newHeight && this.documentAnchor)
 			return;
 
 		// Drawing may happen asynchronously so backup the old contents to avoid
@@ -1799,7 +1799,7 @@ class CanvasSectionContainer {
 		this.context.setTransform(1, 0, 0, 1, 0, 0);
 
 		var subsetBounds: cool.Bounds = null;
-		// if there is a tileSubset we only want to draw the miniumum region of its bounds
+		// if there is a tileSubset we only want to draw the minimum region of its bounds
 		if (tileSubset) {
 			const tileSection: cool.TilesSection = (this.getSectionWithName(L.CSections.Tiles.name) as any) as cool.TilesSection;
 			if (tileSection && this.shouldDrawSection((tileSection as any) as CanvasSectionObject)) {

@@ -59,6 +59,7 @@
 #include <wasm/base64.hpp>
 #include <common/ConfigUtil.hpp>
 #include <common/Unit.hpp>
+#include <common/Util.hpp>
 
 // Bug in pre C++17 where static constexpr must be defined. Fixed in C++17.
 constexpr std::chrono::microseconds SocketPoll::DefaultPollTimeoutMicroS;
@@ -1062,8 +1063,9 @@ bool StreamSocket::sendAndShutdown(http::Response& response)
 
 void SocketPoll::dumpState(std::ostream& os) const
 {
+    THREAD_UNSAFE_DUMP_BEGIN
     // FIXME: NOT thread-safe! _pollSockets is modified from the polling thread!
-    const auto pollSockets = _pollSockets;
+    const std::vector<std::shared_ptr<Socket>> pollSockets = _pollSockets;
 
     os << "\n  SocketPoll [" << name() << "] with " << pollSockets.size() << " socket"
        << (pollSockets.size() == 1 ? "" : "s") << " - wakeup rfd: " << _wakeup[0]
@@ -1076,6 +1078,7 @@ void SocketPoll::dumpState(std::ostream& os) const
     for (const std::shared_ptr<Socket>& socket : pollSockets)
         socket->dumpState(os);
     os << "\n  Done [" << name() << "]\n";
+    THREAD_UNSAFE_DUMP_END
 }
 
 /// Returns true on success only.

@@ -836,7 +836,7 @@ public:
     }
 
     /// Parses a Status Line.
-    /// Returns the state and clobbers the len on succcess to the number of bytes read.
+    /// Returns the state and clobbers the len on success to the number of bytes read.
     FieldParseState parse(const char* p, int64_t& len);
 
     bool writeData(Buffer& out) const
@@ -959,6 +959,8 @@ public:
     void saveBodyToFile(const std::string& path)
     {
         _bodyFile.open(path, std::ios_base::out | std::ios_base::binary);
+        if (!_bodyFile.good())
+            LOG_ERR("Unable to open [" << path << "] for saveBodyToFile");
         _onBodyWriteCb = [this](const char* p, int64_t len)
         {
             LOG_TRC("Writing " << len << " bytes");

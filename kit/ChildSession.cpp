@@ -484,6 +484,11 @@ bool ChildSession::_handleInput(const char *buffer, int length)
 
         return success;
     }
+    else if (tokens.equals(0, "addconfig"))
+    {
+        Poco::Path presetsPath(JAILED_CONFIG_ROOT);
+        getLOKit()->setOption("addconfig", Poco::URI(presetsPath).toString().c_str());
+    }
     else if (!_isDocLoaded)
     {
         sendTextFrameAndLogError("error: cmd=" + tokens[0] + " kind=nodocloaded");
@@ -3946,6 +3951,10 @@ LogUiCommands::~LogUiCommands()
                     return;
                 actCmd = (*_tokens)[0];
                 actSubCmd = (*_tokens)[1];
+                std::size_t pos = actSubCmd.find_first_of ('?');
+                if (pos != std::string::npos) {
+                    actSubCmd = actSubCmd.substr (0,pos);
+                }
             }
             else if (_tokens->equals(0, "mouse"))
             {
@@ -4045,8 +4054,8 @@ LogUiCommands::~LogUiCommands()
             }
             // Store new command
             LogUiCommandsLine& lineAct = _session->_lastUiCmdLinesLogged[lineCount];
-            lineAct._cmd = actCmd;
-            lineAct._subCmd = actSubCmd;
+            lineAct._cmd = std::move(actCmd);
+            lineAct._subCmd = std::move(actSubCmd);
             lineAct._repeat = 1;
             lineAct._undoChange = undoChg;
             lineAct._timeStart = actTime;

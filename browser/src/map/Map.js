@@ -1189,7 +1189,7 @@ L.Map = L.Evented.extend({
 	},
 
 	// just set the keyboard state for mobile
-	// we dont want to change the focus, we know that keyboard is closed
+	// we don't want to change the focus, we know that keyboard is closed
 	// and we are just setting the state here
 	setAcceptInput: function (acceptInput) {
 		this._textInput._setAcceptInput(acceptInput);
@@ -1442,6 +1442,13 @@ L.Map = L.Evented.extend({
 		}
 
 		app.idleHandler._activate();
+
+		if (app.definitions.CommentSection.needFocus)
+		{
+			app.definitions.CommentSection.needFocus.focus();
+			app.sectionContainer.getSectionWithName(L.CSections.CommentList.name).select(app.needFocus)
+			app.definitions.CommentSection.needFocus = null;
+		}
 	},
 
 	// Event to change the focus to dialog or editor.

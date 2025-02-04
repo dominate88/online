@@ -13,7 +13,7 @@
  * L.Control.NotebookbarWriter - definition of notebookbar content in Writer
  */
 
-/* global _ _UNO app */
+/* global _ _UNO */
 
 var fileTabName = 'File';
 var homeTabName = 'Home';
@@ -509,6 +509,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				],
 				'vertical': 'true'
 			},
+			{ type: 'separator', id: 'home-undoredo-break', orientation: 'vertical' },
 			{
 				'id': 'home-paste:PasteMenu',
 				'type': 'menubutton',
@@ -560,6 +561,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				],
 				'vertical': 'true'
 			},
+			{ type: 'separator', id: 'home-resertattributes-break', orientation: 'vertical' },
 			{
 				'type': 'container',
 				'children': [
@@ -693,6 +695,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				],
 				'vertical': 'true'
 			},
+			{ type: 'separator', id: 'home-fontcombobox-break', orientation: 'vertical' },
 			{
 				'id': 'home-insert-annotation',
 				'type': 'bigtoolitem',
@@ -700,6 +703,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				'command': '.uno:InsertAnnotation',
 				'accessibility': { focusBack: false, combination: 'ZC', de: 'ZC' }
 			},
+			{ type: 'separator', id: 'home-insertannotation-break', orientation: 'vertical' },
 			{
 				'type': 'container',
 				'children': [
@@ -829,6 +833,36 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				'vertical': 'false'
 			},
 			{
+				'id': 'stylesview-btn',
+				'type': 'container',
+				'children': [
+					{
+						'id': 'scroll-up',
+						'type': 'customtoolitem',
+						'text': _('Scroll up'),
+						'command': 'scrollpreviewup',
+						'icon': 'lc_searchprev.svg',
+					},
+					{
+						'id': 'scroll-down',
+						'type': 'customtoolitem',
+						'text': _('Scroll down'),
+						'command': 'scrollpreviewdown',
+						'icon': 'lc_searchnext.svg',
+					},
+					{
+						'id': 'format-style-list-dialog',
+						'type': 'toolitem',
+						'text': _('Style list'),
+						'command': '.uno:SidebarDeck.StyleListDeck',
+						'icon': 'lc_morebutton.svg',
+						'accessibility': { focusBack: true, combination: 'SD', de: null }
+					},
+				],
+				'vertical': 'true'
+			},
+			{ type: 'separator', id: 'home-stylesview-break', orientation: 'vertical' },
+			{
 				'type': 'container',
 				'children': [
 					{
@@ -875,6 +909,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				],
 				'vertical': 'true'
 			},
+			{ type: 'separator', id: 'home-charmapcontrol-break', orientation: 'vertical' },
 			{
 				'type': 'container',
 				'children': [
@@ -896,7 +931,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 								{
 									'id': 'home-search-dialog',
 									'type': 'toolitem',
-									'text': _UNO('.uno:SearchDialog'),
+									'text': _('Replace'),
 									'command': '.uno:SearchDialog',
 									'accessibility': { focusBack: false, 	combination: 'FD',	de: 'US' }
 								}
@@ -933,13 +968,13 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				'command': '.uno:ParagraphDialog',
 				'accessibility': { focusBack: false, combination: 'B', de: null }
 			},
-			app.isExperimentalMode() ? {
+			{
 				'id': 'format-style-dialog',
 				'type': 'bigtoolitem',
 				'text': _('Style list'),
 				'command': '.uno:SidebarDeck.StyleListDeck',
 				'accessibility': { focusBack: false, combination: 'SD', de: null }
-			} : {},
+			},
 			{
 				'id': 'format-FormatBulletsMenu',
 				'type': 'menubutton',
@@ -1136,6 +1171,14 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				'command': 'hyperlinkdialog',
 				'accessibility': { focusBack: false,	combination: 'ZL',	de:	'8' }
 			},
+			(this._map['wopi'].EnableRemoteAIContent) ? {
+				'id': 'insert-insert-remote-ai-content',
+				'class': 'unoremoteaicontent',
+				'type': 'bigcustomtoolitem',
+				'text': _('Assistant'),
+				'command': 'remoteaicontent',
+				'accessibility': { focusBack: true, combination: 'RL', de: null }
+			} : {},
 			{
 				'id': 'insert-insert-annotation',
 				'type': 'bigtoolitem',
