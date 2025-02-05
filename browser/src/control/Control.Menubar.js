@@ -768,6 +768,7 @@ L.Control.Menubar = L.Control.extend({
 				   {uno: '.uno:Navigator', id: 'navigator'},
 				   {type: 'separator'},
 				   {name: _UNO('.uno:ToggleSheetGrid', 'spreadsheet', true), uno: '.uno:ToggleSheetGrid', id: 'sheetgrid'},
+				   {name: _UNO('.uno:ViewColumnRowHighlighting', 'spreadsheet', true), type:'action', id: 'columnrowhighlight'},
 				   {name: _UNO('.uno:FreezePanes', 'spreadsheet', true), id: 'FreezePanes', type: 'action', uno: '.uno:FreezePanes'},
 				   {name: _UNO('.uno:FreezeCellsMenu', 'spreadsheet', true), id: 'FreezeCellsMenu', type: 'menu', uno: '.uno:FreezeCellsMenu', menu: [
 					   {name: _UNO('.uno:FreezePanesColumn', 'spreadsheet', true), id: 'FreezePanesColumn', type: 'action', uno: '.uno:FreezePanesColumn'},
@@ -1409,7 +1410,8 @@ L.Control.Menubar = L.Control.extend({
 		this._initializeMenu(this.options.initial);
 
 		map.on('doclayerinit', this._onDocLayerInit, this);
-		app.events.on('updatepermission', this._onRefresh.bind(this));
+		this._onRefresh = this._onRefresh.bind(this);
+		app.events.on('updatepermission', this._onRefresh);
 		map.on('addmenu', this._addMenu, this);
 		map.on('languagesupdated', this._onInitLanguagesMenu, this);
 		map.on('updatetoolbarcommandvalues', this._onStyleMenu, this);
@@ -1425,6 +1427,7 @@ L.Control.Menubar = L.Control.extend({
 		this._map.off('updatetoolbarcommandvalues', this._onStyleMenu, this);
 		this._map.off('initmodificationindicator', this._onInitModificationIndicator, this);
 		this._map.off('updatemodificationindicator', this._onUpdateModificationIndicator, this);
+		app.events.off('updatepermission', this._onRefresh);
 
 		this._menubarCont.remove();
 		this._menubarCont = null;
@@ -1547,7 +1550,8 @@ L.Control.Menubar = L.Control.extend({
 		}
 
 		// clear initial menu
-		L.DomUtil.removeChildNodes(this._menubarCont);
+		if (this._menubarCont)
+			L.DomUtil.removeChildNodes(this._menubarCont);
 
 		// Add document specific menu
 		var docType = this._map.getDocType();
@@ -1888,6 +1892,10 @@ L.Control.Menubar = L.Control.extend({
 						}
 					} else if (id === 'serveraudit' && (app.isAdminUser === false || !self._map.serverAuditDialog)) {
 						$(aItem).css('display', 'none');
+					} else if (id === 'columnrowhighlight') {
+						itemState = app.map.uiManager.getHighlightMode();
+						if (itemState) $(aItem).addClass(constChecked);
+						else $(aItem).removeClass(constChecked);
 					} else {
 						$(aItem).removeClass('disabled');
 					}
@@ -2149,6 +2157,8 @@ L.Control.Menubar = L.Control.extend({
 			app.dispatcher.dispatch('.uno:AcceptAllTrackedChanges');
 		} else if (id === 'rejectalltrackedchanges') {
 			app.dispatcher.dispatch('.uno:RejectAllTrackedChanges');
+		} else if (id === 'columnrowhighlight') {
+			app.dispatcher.dispatch('columnrowhighlight');
 		}
 		// Inform the host if asked
 		if (postmessage)

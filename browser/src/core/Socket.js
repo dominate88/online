@@ -757,7 +757,7 @@ app.definitions.Socket = L.Class.extend({
 			versionContainer.replaceChildren();
 			versionContainer.appendChild(document.createTextNode(lokitVersionObj.ProductName + '\xA0' + lokitVersionObj.ProductVersion + lokitVersionObj.ProductExtension));
 
-			h = lokitVersionObj.BuildId.substring(0, 7);
+			h = lokitVersionObj.BuildId.substring(0, 10);
 			if (parseInt(h,16).toString(16) === h.toLowerCase().replace(/^0+/, '')) {
 				const anchor = document.createElement('a');
 				anchor.setAttribute('target', '_blank');
@@ -1532,6 +1532,17 @@ app.definitions.Socket = L.Class.extend({
 		if (!this._map._docLayer) {
 			// initialize and append text input before doc layer
 			this._map.initTextInput(command.type);
+
+			// Reinitialize the menubar and top toolbar if browser settings are enabled.
+			// During the initial `initializeBasicUI` call, we don't know if compact mode is enabled.
+			// Before `doclayerinit`, we recheck the compact mode setting and if conditions are met,
+			// add the top toolbar and menubar controls to the map.
+			if (window.prefs.useBrowserSetting) {
+				if (!window.mode.isMobile() && this._map.uiManager.getCurrentMode() === 'notebookbar')
+					this._map.uiManager.removeClassicUI();
+				else if (!this._map.menubar)
+					this._map.uiManager.initializeMenubarAndTopToolbar();
+			}
 
 			// first status message, we need to create the document layer
 			var tileWidthTwips = this._map.options.tileWidthTwips;

@@ -374,7 +374,7 @@ L.Map.Keyboard = L.Handler.extend({
 	// printable characters. Those are handled by TextInput.js.
 	_onKeyDown: function (ev) {
 		if (this._map.uiManager.isUIBlocked()
-			|| ((this._map._docLayer._docType === 'presentation' || this._map._docLayer._docType === 'drawing') && this._map._docLayer._preview.partsFocused === true)
+			|| (this._map._docLayer && (this._map._docLayer._docType === 'presentation' || this._map._docLayer._docType === 'drawing') && this._map._docLayer._preview.partsFocused === true)
 		)
 			return;
 
@@ -483,15 +483,16 @@ L.Map.Keyboard = L.Handler.extend({
 			return;
 		}
 
+		var docLayer = this._map._docLayer;
+
 		// if any key is pressed, we stop the following other users
-		this._map.userList.followUser(this._map._docLayer._viewId, false);
+		if (docLayer) this._map.userList.followUser(docLayer._viewId, false);
 
 		if (window.KeyboardShortcuts.processEvent(app.UI.language.fromURL, ev)) {
 			ev.shortCutActivated = true;
 			ev.preventDefault();
 			return;
 		}
-		var docLayer = this._map._docLayer;
 		if (!keyEventFn && docLayer && docLayer.postKeyboardEvent) {
 			// default is to post keyboard events on the document
 			keyEventFn = L.bind(docLayer.postKeyboardEvent, docLayer);
@@ -568,7 +569,7 @@ L.Map.Keyboard = L.Handler.extend({
 		}
 
 		if (this._map.isEditMode()) {
-			docLayer._resetPreFetching();
+			if (docLayer) docLayer._resetPreFetching();
 
 			if (this._ignoreKeyEvent(ev)) {
 				// key ignored
@@ -668,11 +669,6 @@ L.Map.Keyboard = L.Handler.extend({
 
 		// Control + INSERT
 		if (this._isCtrlKey(e) && e.keyCode === this.keyCodes.INSERT) {
-			return true;
-		}
-
-		// Control + F3, ignore Autotext dialog
-		if (this._isCtrlKey(e) && e.keyCode === this.keyCodes.F3) {
 			return true;
 		}
 

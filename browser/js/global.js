@@ -281,8 +281,14 @@ class InitializerBase {
 			document.getElementById('content-keeper').remove();
 		}, false);
 
-		window.brandProductName = document.getElementById("init-product-branding-name").value;
-		window.brandProductURL = document.getElementById("init-product-branding-url").value;
+		let productName = document.getElementById("init-product-branding-name").value;
+		if (typeof productName === 'string' && productName.length) {
+			window.brandProductName = productName;
+		}
+		let productURL = document.getElementById("init-product-branding-url").value;
+		if (typeof productURL === 'string' && productURL.length) {
+			window.brandProductURL = productURL;
+		}
 
 		this.initiateCoolParams();
 	}
@@ -645,6 +651,9 @@ function getInitializerClass() {
 
 			global.prefs._localStorageCache = {};
 			global.prefs.useBrowserSetting = true;
+
+			// make sure set accessibilityState for cypress
+			global.getAccessibilityState();
 		},
 
 		_renameLocalStoragePref: function(oldName, newName) {
@@ -701,8 +710,10 @@ function getInitializerClass() {
 				return uiDefault;
 			}
 
-			if (global.prefs.useBrowserSetting && Object.prototype.hasOwnProperty.call(global.prefs._userBrowserSetting, key)) {
-				const val = global.prefs._userBrowserSetting[key];
+			if (global.prefs.useBrowserSetting) {
+				let val = defaultValue;
+				if (Object.prototype.hasOwnProperty.call(global.prefs._userBrowserSetting, key))
+					val = global.prefs._userBrowserSetting[key];
 				global.prefs._localStorageCache[key] = val;
 				return val;
 			}

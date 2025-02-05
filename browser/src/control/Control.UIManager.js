@@ -80,6 +80,17 @@ L.Control.UIManager = L.Control.extend({
 		return this.shouldUseNotebookbarMode() ? 'notebookbar' : 'classic';
 	},
 
+	getHighlightMode: function() {
+		return window.prefs.getBoolean('ColumnRowHighlightEnabled', false);
+	},
+
+	setHighlightMode: function( newState ) {
+		window.prefs.set('ColumnRowHighlightEnabled', newState);
+		let highlightState = newState? 'true' : 'false';
+		this.map['stateChangeHandler'].setItemValue('columnrowhighlight', highlightState);
+		this._map.fire('commandstatechanged', {commandName : 'columnrowhighlight', state : highlightState});
+	},
+
 	shouldUseNotebookbarMode: function() {
 		let forceCompact = window.prefs.getBoolean('compactMode', null);
 		// all other cases should default to notebookbar
@@ -237,26 +248,31 @@ L.Control.UIManager = L.Control.extend({
 		// Wait for Coolwsd to initiate the switch.
 	},
 
-	initializeBasicUI: function() {
-		var enableNotebookbar = this.shouldUseNotebookbarMode();
-		var that = this;
-
-		if (window.mode.isMobile() || !enableNotebookbar) {
+	initializeMenubarAndTopToolbar: function () {
+		let enableNotebookbar = this.shouldUseNotebookbarMode();
+		let isMobile = window.mode.isMobile();
+		if (isMobile || !enableNotebookbar) {
 			var menubar = L.control.menubar();
 			this.map.menubar = menubar;
 			this.map.addControl(menubar);
 		}
 
+		if (!isMobile && !enableNotebookbar)
+			this.map.topToolbar = JSDialog.TopToolbar(this.map);
+	},
+
+	initializeBasicUI: function () {
+		var that = this;
+
+		this.initializeMenubarAndTopToolbar();
+
 		if (window.mode.isMobile()) {
-			$('#toolbar-mobile-back').on('click', function() {
+			$('#toolbar-mobile-back').on('click', function () {
 				that.enterReadonlyOrClose();
 			});
 		}
 
 		if (!window.mode.isMobile()) {
-			if (!enableNotebookbar)
-				this.map.topToolbar = JSDialog.TopToolbar(this.map);
-
 			this.map.statusBar = JSDialog.StatusBar(this.map);
 
 			this.map.sidebar = JSDialog.Sidebar(this.map, {animSpeed: 200});
@@ -376,6 +392,10 @@ L.Control.UIManager = L.Control.extend({
 			// remove unused elements
 			L.DomUtil.remove(L.DomUtil.get('presentation-controls-wrapper'));
 			document.getElementById('selectbackground').parentNode.removeChild(document.getElementById('selectbackground'));
+
+			let highlightState = this.getHighlightMode()? 'true' : 'false';
+			this.map['stateChangeHandler'].setItemValue('columnrowhighlight', highlightState);
+			this._map.fire('commandstatechanged', {commandName : 'columnrowhighlight', state : highlightState});
 		}
 
 		if (this.map.isPresentationOrDrawing()) {
