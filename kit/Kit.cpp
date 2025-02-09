@@ -2089,7 +2089,7 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
 
 bool Document::forwardToChild(const std::string& prefix, const std::vector<char>& payload)
 {
-    assert(payload.size() > prefix.size());
+    assert(Util::isFuzzing() || payload.size() > prefix.size());
 
     // Remove the prefix and trim.
     std::size_t index = prefix.size();
@@ -2394,7 +2394,8 @@ void Document::drainQueue()
             }
             else if (tokens.equals(0, "tile") || tokens.equals(0, "tilecombine"))
             {
-                assert(false && "Should not have incoming tile requests in message queue");
+                assert(Util::isFuzzing() &&
+                       "Should not have incoming tile requests in message queue");
             }
             else if (tokens.startsWith(0, "child-"))
             {
@@ -2409,7 +2410,7 @@ void Document::drainQueue()
             }
             else if (tokens.equals(0, "callback"))
             {
-                assert(false && "callbacks cannot now appear on the incoming queue");
+                assert(Util::isFuzzing() && "callbacks cannot now appear on the incoming queue");
             }
             else
             {
@@ -3005,7 +3006,7 @@ int pollCallback(void* data, int timeoutUs)
 bool anyInputCallback(void* data)
 {
     auto kitSocketPoll = reinterpret_cast<KitSocketPoll*>(data);
-    std::shared_ptr<Document> document = kitSocketPoll->getDocument();
+    const std::shared_ptr<Document>& document = kitSocketPoll->getDocument();
 
     return document && document->hasQueueItems();
 }
@@ -3152,7 +3153,8 @@ void lokit_main(
     const std::string LogLevelStartup = logLevelStartup ? logLevelStartup : "trace";
 
     const bool bTraceStartup = (std::getenv("COOL_TRACE_STARTUP") != nullptr);
-    Log::initialize("kit", bTraceStartup ? LogLevelStartup : logLevel, logColor, logToFile, logProperties, logToFileUICmd, logPropertiesUICmd);
+    Log::initialize("kit", bTraceStartup ? LogLevelStartup : LogLevel, logColor, logToFile,
+                    logProperties, logToFileUICmd, logPropertiesUICmd);
     if (bTraceStartup && LogLevel != LogLevelStartup)
     {
         LOG_INF("Setting log-level to [" << LogLevelStartup << "] and delaying "

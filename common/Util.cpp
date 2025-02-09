@@ -215,7 +215,7 @@ namespace Util
 
     bool kitInProcess = false;
     void setKitInProcess(bool value) { kitInProcess = value; }
-    bool isKitInProcess() { return kitInProcess || isFuzzing() || isMobileApp(); }
+    bool isKitInProcess() { return isFuzzing() || isMobileApp() || kitInProcess; }
 
     std::string replace(std::string result, const std::string& a, const std::string& b)
     {
@@ -629,15 +629,6 @@ namespace Util
         ss << buffer << '.' << std::setfill('0') << std::setw(3) << msFraction << ' '
            << tm.tm_year + 1900;
         return ss.str();
-    }
-
-    bool isFuzzing()
-    {
-#if LIBFUZZER
-        return true;
-#else
-        return false;
-#endif
     }
 
     std::map<std::string, std::string> stringVectorToMap(const std::vector<std::string>& strvector, const char delimiter)
