@@ -13,7 +13,7 @@
  * L.Control.NotebookbarWriter - definition of notebookbar content in Writer
  */
 
-/* global _ _UNO */
+/* global _ _UNO app */
 
 var fileTabName = 'File';
 var homeTabName = 'Home';
@@ -1078,7 +1078,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 	},
 
 	getInsertTab: function() {
-		var isODF = L.LOUtil.isFileODF(this._map);
+		var isODF = app.LOUtil.isFileODF(this._map);
 		var content = [
 			{
 				'id': 'insert-insert-page-break',
@@ -1090,7 +1090,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 			{
 				'id': 'insert-insert-table:InsertTableMenu',
 				'type': 'menubutton',
-				'text': _UNO('.uno:InsertTable', 'text'),
+				'text': _('Table'),
 				'command': '.uno:InsertTable',
 				'accessibility': { focusBack: false,	combination: 'IT',	de: null }
 			},
@@ -1381,7 +1381,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 							{
 								'id': 'insert-insert-objects-star-math',
 								'type': 'toolitem',
-								'text': _UNO('.uno:InsertObjectStarMath', 'text'),
+								'text': _('Formula'),
 								'command': '.uno:InsertObjectStarMath',
 								'accessibility': { focusBack: true,	combination: 'ET',	de:	null }
 							}
@@ -2675,7 +2675,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 	},
 
 	getDrawTab: function() {
-		var isODF = L.LOUtil.isFileODF(this._map);
+		var isODF = app.LOUtil.isFileODF(this._map);
 		var content = [
 			{
 				'type': 'bigtoolitem',

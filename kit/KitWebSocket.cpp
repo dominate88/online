@@ -219,6 +219,9 @@ void BgSaveChildWebSocketHandler::onDisconnect()
 {
     LOG_TRC("Disconnected background web socket to parent kit");
     UnitKit::get().preBackgroundSaveExit();
+
+    Document::shutdownBackgroundWatchdog();
+
     Util::forcedExit(EX_OK);
 }
 
@@ -309,8 +312,10 @@ void BgSaveParentWebSocketHandler::handleMessage(const std::vector<char>& data)
             object->get("commandName").toString() == ".uno:Save")
         {
             if (object->get("success").toString() == "true")
+            {
                 _document->notifySyntheticUnmodifiedState();
-
+                _session->saveLogUiBackground();
+            }
             else
             {
                 _document->updateModifiedOnFailedBgSave();

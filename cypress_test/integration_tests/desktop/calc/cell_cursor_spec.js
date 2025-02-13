@@ -30,6 +30,9 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Test jumping on large cell
 	});
 
 	it('Jump on search with not visible cursor', function() {
+		desktopHelper.assertScrollbarPosition('vertical', 0, 30);
+		cy.cGet(helper.addressInputSelector).should('have.value', 'Z11');
+
 		desktopHelper.assertScrollbarPosition('horizontal', 205, 320);
 		cy.cGet('input#search-input').clear().type('FIRST{enter}');
 
@@ -74,5 +77,32 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Test jumping on large cell
 
 		cy.cGet(helper.addressInputSelector).should('have.value', 'B2:AA2');
 		desktopHelper.assertScrollbarPosition('horizontal', 270, 390);
+	});
+});
+
+describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Test decimal separator of cells with different languages.', function() {
+	beforeEach(function() {
+		helper.setupAndLoadDocument('calc/decimal_separator.ods');
+		desktopHelper.switchUIToCompact();
+		cy.cGet('#toolbar-up .ui-scroll-right').click();
+		cy.cGet('#sidebar').click({force: true});
+	});
+
+	it('Check different decimal separators', function() {
+		helper.typeIntoInputField(helper.addressInputSelector, 'A1');
+		cy.wait(400);
+
+		cy.window().then(win => {
+			var app = win['0'].app;
+			cy.expect(app.calc.decimalSeparator).to.be.equal('.');
+		});
+
+		helper.typeIntoInputField(helper.addressInputSelector, 'B1');
+		cy.wait(400);
+
+		cy.window().then(win => {
+			var app = win['0'].app;
+			cy.expect(app.calc.decimalSeparator).to.be.equal(',');
+		});
 	});
 });

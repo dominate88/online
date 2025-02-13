@@ -1,4 +1,5 @@
 /* -*- js-indent-level: 8 -*- */
+/* global app */
 /*
  * Copyright the Collabora Online contributors.
  *
@@ -53,7 +54,7 @@ L.Control.MenubarShortcuts = {
 			shortcut = shortcut.replace('Ctrl', 'Krmilka').replace('Alt', 'izmenjalka').replace('Shift', 'dvigalka');
 		}
 
-		var newText = _(text).replace('~', '') + ' (' + L.Util.replaceCtrlAltInMac(shortcut) + ')';
+		var newText = _(text).replace('~', '') + ' (' + app.util.replaceCtrlAltInMac(shortcut) + ')';
 
 		return newText;
 	}
@@ -2082,7 +2083,7 @@ L.Control.Menubar = L.Control.extend({
 		} else if (id === 'zoomreset') {
 			app.dispatcher.dispatch('zoomreset');
 		} else if (id === 'fullscreen') {
-			L.toggleFullScreen();
+			app.util.toggleFullScreen();
 		} else if (id === 'showruler') {
 			app.dispatcher.dispatch('showruler');
 		} else if (id === 'togglea11ystate') {
@@ -2529,7 +2530,7 @@ L.Control.Menubar = L.Control.extend({
 	},
 
 	_initializeMenu: function(menu) {
-		this._isFileODF = L.LOUtil.isFileODF(this._map);
+		this._isFileODF = app.LOUtil.isFileODF(this._map);
 		var menuHtml = this._createMenu(menu);
 		for (var i in menuHtml) {
 			this._menubarCont.appendChild(menuHtml[i]);

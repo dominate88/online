@@ -416,7 +416,7 @@ public:
 
     void handleTileRequest(const StringVector &tokens, bool forceKeyframe,
                            const std::shared_ptr<ClientSession>& session);
-    void handleTileCombinedRequest(TileCombined& tileCombined, bool forceKeyframe,
+    void handleTileCombinedRequest(TileCombined& tileCombined, bool canForceKeyframe,
                                    const std::shared_ptr<ClientSession>& session);
     void sendRequestedTiles(const std::shared_ptr<ClientSession>& session);
     void sendTileCombine(const TileCombined& tileCombined);
@@ -435,17 +435,13 @@ public:
 
     void handleMediaRequest(std::string range, const std::shared_ptr<Socket>& socket, const std::string& tag);
 
-    /// True if any flag to unload or terminate is set.
-    bool isUnloading() const
-    {
-        return _docState.isMarkedToDestroy() || _stop || _docState.isUnloadRequested() ||
-               _docState.isCloseRequested() || SigUtil::getShutdownRequestFlag();
-    }
+    /// True if any flag to close, terminate, or to unload is set.
+    bool isUnloading() const { return isUnloadingUnrecoverably() || _docState.isUnloadRequested(); }
 
-    /// True if any flag to unload or terminate is set.
+    /// True if any flag to close or terminate is set.
     bool isUnloadingUnrecoverably() const
     {
-        return _docState.isMarkedToDestroy() || _stop || _docState.isCloseRequested() ||
+        return isMarkedToDestroy() || _docState.isCloseRequested() ||
                SigUtil::getShutdownRequestFlag();
     }
 
@@ -592,6 +588,13 @@ public:
 #endif // !MOBILEAPP
 
 private:
+    /// Checks if we really need to request tile rendering or it's in progress
+    /// returns true if all tiles are of the same part and size so can be grouped
+    inline bool requestTileRendering(TileDesc& tile, bool forceKeyFrame,
+                                     const std::chrono::steady_clock::time_point &now,
+                                     std::vector<TileDesc>& tilesNeedsRendering,
+                                     const std::shared_ptr<ClientSession>& session);
+
     /// Get the session that can write the document for save / locking / uploading.
     /// Note that if there is no loaded and writable session, the first will be returned.
     std::shared_ptr<ClientSession> getWriteableSession() const;

@@ -14,7 +14,7 @@
  *			 and allows to controll them (show/hide)
  */
 
-/* global app $ setupToolbar _ Hammer JSDialog SlideShow */
+/* global app $ setupToolbar _ JSDialog SlideShow */
 L.Control.UIManager = L.Control.extend({
 	mobileWizard: null,
 	documentNameInput: null,
@@ -697,19 +697,25 @@ L.Control.UIManager = L.Control.extend({
 				newButton[0].text = newButton[0].hint;
 				topToolbar.insertItem(insertBefore, newButton);
 
-				// add the css rule for the image
-				const item = document.querySelector(".w2ui-icon." + encodeURIComponent(button.id));
-				if (item) {
-					item.style.background = 'url("' + encodeURI(button.imgurl) + '")';
-					item.style.backgroundRepeat = 'no-repeat';
-					item.style.backgroundPosition = 'center';
-				}
+				// updated css rules to show custom button images
+				this.setCssRulesForCustomButtons();
 			}
 		}
 
 		if (this.map.isReadOnlyMode()) {
 			// Just add a menu entry for it
 			this.map.fire('addmenu', {id: button.id, label: button.hint});
+		}
+	},
+
+	setCssRulesForCustomButtons: function() {
+		for (var button of this.customButtons) {
+			const item = document.querySelector(".w2ui-icon." + encodeURIComponent(button.id));
+			if (item) {
+				item.style.background = 'url("' + encodeURI(button.imgurl) + '")';
+				item.style.backgroundRepeat = 'no-repeat';
+				item.style.backgroundPosition = 'center';
+			}
 		}
 	},
 
@@ -1747,37 +1753,6 @@ L.Control.UIManager = L.Control.extend({
 		const docType = this.map.getDocType();
 		return window.prefs.getBoolean(`${docType}.${name}`, defaultValue);
 	},
-
-	enableTooltip: function(element) {
-		var elem = $(element);
-		if (window.mode.isDesktop()) {
-			if (this._tooltip) {
-				$(".ui-tooltip").remove();
-				this._tooltip = undefined;
-			}
-			this._tooltip = elem.tooltip();
-			elem.on("mousedown", function() {
-				$('.ui-tooltip').fadeOut(function() {
-					$(this).remove();
-				});
-			});
-		}
-		else {
-			elem.tooltip();
-			elem.tooltip({disabled: true});
-			(new Hammer(elem.get(0), {recognizers: [[Hammer.Press]]}))
-				.on('press', function () {
-					elem.tooltip('enable');
-					elem.tooltip('open');
-					document.addEventListener('touchstart', function closeTooltip () {
-						elem.tooltip('close');
-						elem.tooltip('disable');
-						document.removeEventListener('touchstart', closeTooltip);
-					});
-				}.bind(this));
-
-		}
-	}
 });
 
 L.control.uiManager = function () {

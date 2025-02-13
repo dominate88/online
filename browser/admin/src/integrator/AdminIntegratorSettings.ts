@@ -46,8 +46,8 @@ const API_ENDPOINTS = {
 	uploadSettings: window.enableDebug
 		? '/wopi/settings/upload'
 		: '/browser/dist/upload-settings',
-	fetchSharedConfig: '/browser/dist/fetch-shared-config',
-	deleteSharedConfig: '/browser/dist/delete-shared-config',
+	fetchSharedConfig: '/browser/dist/fetch-settings-config',
+	deleteSharedConfig: '/browser/dist/delete-settings-config',
 };
 
 const PATH = {
@@ -181,6 +181,7 @@ function insertConfigSections(): void {
 			fileInput.addEventListener('change', () => {
 				if (fileInput.files?.length) {
 					uploadFile(cfg.uploadPath, fileInput.files[0]);
+					fileInput.value = '';
 				}
 			});
 		}

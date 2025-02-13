@@ -257,6 +257,8 @@ app.definitions.Socket = L.Class.extend({
 
 		msg += ' accessibilityState=' + window.getAccessibilityState();
 
+		msg += ' clientvisiblearea=' + window.makeClientVisibleArea();
+
 		this._doSend(msg);
 		for (var i = 0; i < this._msgQueue.length; i++) {
 			this._doSend(this._msgQueue[i]);
@@ -1215,7 +1217,7 @@ app.definitions.Socket = L.Class.extend({
 				this._map.fire('infobar',
 					{
 						msg: textMsg,
-						action: L.Util.getProduct(),
+						action: app.util.getProduct(),
 						actionLabel: errorMessages.infoandsupport
 					});
 			}
@@ -1431,7 +1433,7 @@ app.definitions.Socket = L.Class.extend({
 			callbackList.push({ id: 'save-to-new-file', func_: function() {
 				var filename = this._map['wopi'].BaseFileName;
 				if (filename) {
-					filename = L.LOUtil.generateNewFileName(filename, '_new');
+					filename = app.LOUtil.generateNewFileName(filename, '_new');
 					this._map.saveAs(filename);
 				}
 			}.bind(this)});
@@ -1617,7 +1619,7 @@ app.definitions.Socket = L.Class.extend({
 	_onJSDialog: function(textMsg, callback) {
 		var msgData = JSON.parse(textMsg.substring('jsdialog:'.length + 1));
 
-		if (msgData.children && !L.Util.isArray(msgData.children)) {
+		if (msgData.children && !app.util.isArray(msgData.children)) {
 			window.app.console.warn('_onJSDialogMsg: The children\'s data should be created of array type');
 			return;
 		}

@@ -13,7 +13,7 @@
  * Class Tooltip - tooltip manager
  */
 
-/* global */
+/* global app */
 
 class Tooltip {
 	constructor(options) {
@@ -135,7 +135,7 @@ class Tooltip {
 
 		do {
 			rectTooltip = this.position(rectElem, rectCont, index++);
-		} while (index < 8 && !L.LOUtil.containsDOMRect(rectView, rectTooltip));
+		} while (index < 8 && !app.LOUtil.containsDOMRect(rectView, rectTooltip));
 		// containsDOMRect() checks if the tooltip box(rectTooltip) is inside the boundaries of the window(rectView)
 
 		this._container.style.left = rectTooltip.left + 'px';
@@ -171,8 +171,23 @@ class Tooltip {
 			this.mouseLeave();
 		}
 	}
+
+	static attachEventListener(elem, map) {
+		if (!map.tooltip) {
+			return;
+		}
+
+		elem.addEventListener('mouseenter', function () {
+			map.tooltip.beginShow(elem);
+		});
+		elem.addEventListener('mouseleave', function () {
+			map.tooltip.beginHide(elem);
+		});
+	}
 }
 
 L.control.tooltip = function (options) {
 	return new Tooltip(options);
 };
+
+L.control.attachTooltipEventListener = Tooltip.attachEventListener;

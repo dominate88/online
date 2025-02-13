@@ -198,10 +198,18 @@ public:
                   else
                   {
                       // Failed!
-                      LOG_WRN("BgSave timed out and will self-destroy");
+                      LOG_WRN("BgSave timed out and will self-destroy process " << getpid());
                       Log::shutdown(); // Flush logs.
-                      // raise(3) will exit the current thread, not the process.
+                      // this attempts to get the saving-thread to generate a backtrace
                       Util::killThreadById(savingTid, SIGABRT);
+
+                      // It is possible that this process will not exit cleanly after
+                      // handling SIGABRT, so instead after some time fall-back to this:
+
+                      // raise(3) will exit the current thread, not the process.
+                      sleep(30); // long enough for a trace ?
+                      std::cerr << "BgSave failed to terminate after SIGABRT - will hard self-destroy process " << getpid() << std::endl;
+                      ::kill(0, SIGKILL); // kill(2) is trapped by seccomp.
                   }
               })
     {
@@ -221,6 +229,12 @@ private:
 };
 
 static std::unique_ptr<BackgroundSaveWatchdog> BgSaveWatchdog;
+
+void Document::shutdownBackgroundWatchdog()
+{
+    if (BgSaveWatchdog)
+        BgSaveWatchdog->complete();
+}
 
 namespace
 {
@@ -1352,10 +1366,6 @@ void Document::handleSaveMessage(const std::string &)
     if (_isBgSaveProcess)
     {
         LOG_TRC("BgSave completed");
-        if (BgSaveWatchdog)
-        {
-            BgSaveWatchdog->complete();
-        }
 
         auto socket = _saveProcessParent.lock();
         if (socket)
@@ -1867,6 +1877,7 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
     const std::string& batchMode = session->getBatchMode();
     const std::string& enableMacrosExecution = session->getEnableMacrosExecution();
     const std::string& macroSecurityLevel = session->getMacroSecurityLevel();
+    const std::string& clientVisibleArea = session->getInitialClientVisibleArea();
     const bool accessibilityState = session->getAccessibilityState();
     const std::string& userTimezone = session->getTimezone();
     const std::string& userPrivateInfo = session->getUserPrivateInfo();
@@ -1889,6 +1900,9 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
 
     if (!macroSecurityLevel.empty())
         options += ",MacroSecurityLevel=" + macroSecurityLevel;
+
+    if (!clientVisibleArea.empty())
+        options += ",ClientVisibleArea=" + clientVisibleArea;
 
     if (!userTimezone.empty())
         options += ",Timezone=" + userTimezone;
@@ -3227,10 +3241,11 @@ void lokit_main(
             const std::string loJailDestImpressTemplatePath = Poco::Path(loJailDestPath, "share/template/common/presnt").toString();
 
             const std::string sharedPresets = Poco::Path(childRoot, JailUtil::CHILDROOT_TMP_SHARED_PRESETS_PATH).toString();
-            const std::string sharedAutotext = Poco::Path(sharedPresets, "autotext").toString();
+            const std::string configIdPresets = Poco::Path(sharedPresets, Uri::encode(configId)).toString();
+            const std::string sharedAutotext = Poco::Path(configIdPresets, "autotext").toString();
             const std::string loJailDestAutotextPath = Poco::Path(loJailDestPath, "share/autotext/common").toString();
 
-            const std::string sharedWordbook = Poco::Path(sharedPresets, "wordbook").toString();
+            const std::string sharedWordbook = Poco::Path(configIdPresets, "wordbook").toString();
             const std::string loJailDestWordbookPath = Poco::Path(loJailDestPath, "share/wordbook").toString();
 
             const std::string sysTemplateSubDir = Poco::Path(tempRoot, "systemplate-" + jailId).toString();
@@ -3302,26 +3317,28 @@ void lokit_main(
                     return false;
                 }
 
-                // mount the shared autotext over the lo shared autotext's 'common' dir
-                if (!JailUtil::bind(sharedAutotext, loJailDestAutotextPath)
-                    || !JailUtil::remountReadonly(sharedAutotext, loJailDestAutotextPath))
+                if (!configId.empty())
                 {
-                    // TODO: actually do this link on failure
-                    LOG_WRN("Failed to mount [" << sharedAutotext << "] -> ["
-                                                << loJailDestAutotextPath
-                                                << "], will link contents");
-                    return false;
-                }
+                    // mount the shared autotext over the lo shared autotext's 'common' dir
+                    if (!JailUtil::bind(sharedAutotext, loJailDestAutotextPath)
+                        || !JailUtil::remountReadonly(sharedAutotext, loJailDestAutotextPath))
+                    {
+                        // TODO: actually do this link on failure
+                        LOG_WRN("Failed to mount [" << sharedAutotext << "] -> ["
+                                                    << loJailDestAutotextPath
+                                                    << "], will link contents");
+                        return false;
+                    }
 
-                // TODO: both autotext and wordbook needs to mounted can create a separate method to de-duplicate the code
-                // mount the shared wordbook over the lo shared wordbook
-                if (!JailUtil::bind(sharedWordbook, loJailDestWordbookPath)
-                    || !JailUtil::remountReadonly(sharedWordbook, loJailDestWordbookPath))
-                {
-                    // TODO: actually do this link on failure
-                    LOG_WRN("Failed to mount [" << sharedWordbook << "] -> [" << loJailDestWordbookPath
-                                                << "], will link contents");
-                    return false;
+                    // mount the shared wordbook over the lo shared wordbook
+                    if (!JailUtil::bind(sharedWordbook, loJailDestWordbookPath)
+                        || !JailUtil::remountReadonly(sharedWordbook, loJailDestWordbookPath))
+                    {
+                        // TODO: actually do this link on failure
+                        LOG_WRN("Failed to mount [" << sharedWordbook << "] -> [" << loJailDestWordbookPath
+                                                    << "], will link contents");
+                        return false;
+                    }
                 }
 
                 // tmpdir inside the jail for added security.

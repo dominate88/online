@@ -13,7 +13,7 @@
  * L.Control.NotebookbarImpress - definition of notebookbar content in Impress
  */
 
-/* global _ _UNO */
+/* global _ _UNO app */
 
 L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 
@@ -699,7 +699,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 										'text': _UNO('.uno:FontworkGalleryFloater'),
 										'command': '.uno:FontworkGalleryFloater',
 										// Fontwork export/import not supported in other formats.
-										'visible': (L.LOUtil.isFileODF(this._map)) ? 'true' : 'false',
+										'visible': (app.LOUtil.isFileODF(this._map)) ? 'true' : 'false',
 										'accessibility': { focusBack: true, combination: 'FL', de: null }
 									},
 									{
@@ -1202,7 +1202,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 								'id': 'insert-insert-table:InsertTableMenu',
 								'type': 'menubutton',
 								'noLabel': true,
-								'text': _UNO('.uno:InsertTable', 'presentation'),
+								'text': _('Table'),
 								'command': '.uno:InsertTable',
 								'accessibility': { focusBack: true, combination: 'IT', de: null }
 							}
@@ -1392,7 +1392,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 								'text': _UNO('.uno:FontworkGalleryFloater'),
 								'command': '.uno:FontworkGalleryFloater',
 								// Fontwork export/import not supported in other formats.
-								'visible': L.LOUtil.isFileODF(this._map) ? 'true' : 'false',
+								'visible': app.LOUtil.isFileODF(this._map) ? 'true' : 'false',
 								'accessibility': { focusBack: true, combination: 'FW', de: null }
 							}
 						]
@@ -2455,7 +2455,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 								'text': _UNO('.uno:FontworkGalleryFloater'),
 								'command': '.uno:FontworkGalleryFloater',
 								// Fontwork export/import not supported in other formats.
-								'visible': (L.LOUtil.isFileODF(this._map)) ? 'true' : 'false',
+								'visible': (app.LOUtil.isFileODF(this._map)) ? 'true' : 'false',
 								'accessibility': { focusBack: true, combination: 'FW', de: null }
 							}
 						]
