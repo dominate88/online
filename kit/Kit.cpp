@@ -101,6 +101,7 @@
 
 #ifdef IOS
 #include "ios.h"
+#include "DocumentBroker.hpp"
 #endif
 
 using Poco::Exception;
@@ -117,6 +118,11 @@ using JsonUtil::makePropertyValue;
 
 extern "C" { void dump_kit_state(void); /* easy for gdb */ }
 
+#ifdef IOS
+extern std::map<std::string, std::shared_ptr<DocumentBroker>> DocBrokers;
+extern std::mutex DocBrokersMutex;
+#endif
+
 #if !MOBILEAPP
 
 // A Kit process hosts only a single document in its lifetime.
@@ -129,8 +135,7 @@ int getCurrentThreadCount()
 {
     if (threadCounter)
         return threadCounter->count();
-    else
-        return -1;
+    return -1;
 }
 
 #endif
@@ -184,7 +189,9 @@ public:
                   Util::setThreadName("kitbgsv_" + Util::encodeId(mobileAppDocId, 3) + "_wdg");
 
                   const auto timeout = std::chrono::seconds(
-                      ConfigUtil::getInt("per_document.bgsave_timeout_secs", 60));
+                      ConfigUtil::getInt("per_document.bgsave_timeout_secs", 120));
+
+                  const auto saveStart = std::chrono::steady_clock::now();
 
                   std::unique_lock<std::mutex> lock(_watchdogMutex);
 
@@ -197,8 +204,11 @@ public:
                   }
                   else
                   {
+                      auto saveDuration = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - saveStart);
+
                       // Failed!
-                      LOG_WRN("BgSave timed out and will self-destroy process " << getpid());
+                      LOG_WRN("BgSave timed out and will self-destroy process " << getpid() <<
+                              " (config timeout: " << timeout << ", real timeout: " << saveDuration << ")");
                       Log::shutdown(); // Flush logs.
                       // this attempts to get the saving-thread to generate a backtrace
                       Util::killThreadById(savingTid, SIGABRT);
@@ -223,9 +233,9 @@ public:
 
 private:
     std::atomic_bool _saveCompleted; ///< Defend against spurious wakes.
-    std::thread _watchdogThread;
     std::condition_variable _watchdogCV;
     std::mutex _watchdogMutex;
+    std::thread _watchdogThread;
 };
 
 static std::unique_ptr<BackgroundSaveWatchdog> BgSaveWatchdog;
@@ -821,8 +831,8 @@ bool Document::postMessage(const char* data, int size, const WSOpCode code) cons
                 assert(false);
                 return false;
             }
-            else
-                return socket->sendMessage(data, size, code, /*flush=*/true) > 0;
+
+            return socket->sendMessage(data, size, code, /*flush=*/true) > 0;
         }
         else
             LOG_TRC("Failed to forward to parent of save process: connection closed.");
@@ -861,6 +871,8 @@ bool Document::createSession(const std::string& sessionId)
         auto session = std::make_shared<ChildSession>(
             _websocketHandler, sessionId,
             _jailId, JailRoot, *this);
+        if (!Util::isMobileApp())
+            UnitKit::get().postKitSessionCreated(session.get());
         _sessions.emplace(sessionId, session);
         _deltaGen->setSessionCount(_sessions.size());
 
@@ -960,7 +972,7 @@ void Document::setDocumentPassword(int passwordType)
 void Document::renderTiles(TileCombined &tileCombined)
 {
     // Find a session matching our view / render settings.
-    const auto session = _sessions.findByCanonicalId(tileCombined.getNormalizedViewId());
+    const auto session = _sessions.findByCanonicalId(tileCombined.getCanonicalViewId());
     if (!session)
     {
         LOG_ERR("Session is not found. Maybe exited after rendering request.");
@@ -980,7 +992,7 @@ void Document::renderTiles(TileCombined &tileCombined)
     }
 
     // if necessary select a suitable rendering view eg. with 'show non-printing chars'
-    if (tileCombined.getNormalizedViewId())
+    if (tileCombined.getCanonicalViewId() != CanonicalViewId::None)
         _loKitDocument->setView(session->getViewId());
 
     const auto blenderFunc = [&](unsigned char* data, int offsetX, int offsetY,
@@ -1421,7 +1433,8 @@ bool Document::forkToSave(const std::function<void()> &childSave, int viewId)
         return false;
     }
 
-    if (!joinThreads())
+    ThreadDropper threadGuard;
+    if (!threadGuard.dropThreads(this))
     {
         LOG_WRN("Failed to join threads before async save");
         return false;
@@ -1499,6 +1512,8 @@ bool Document::forkToSave(const std::function<void()> &childSave, int viewId)
         SigUtil::addActivity("forked background save process: " +
                              std::to_string(pid));
 
+        threadGuard.clear();
+
         SigUtil::dieOnParentDeath();
 
         childSocket.reset();
@@ -1567,7 +1582,8 @@ bool Document::forkToSave(const std::function<void()> &childSave, int viewId)
 
         getLOKit()->setForkedChild(false);
 
-        startThreads();
+        // now, rather than waiting for the destructor
+        threadGuard.startThreads();
 
         // What better time than to reap while saving?
         reapZombieChildren();
@@ -1742,7 +1758,7 @@ void Document::invalidateCanonicalId(const std::string& sessionId)
         return;
     }
     std::shared_ptr<ChildSession> session = it->second;
-    int newCanonicalId = _sessions.createCanonicalId(getViewProps(session));
+    CanonicalViewId newCanonicalId = _sessions.createCanonicalId(getViewProps(session));
     if (newCanonicalId == session->getCanonicalViewId())
         return;
     session->setCanonicalViewId(newCanonicalId);
@@ -1757,7 +1773,7 @@ void Document::invalidateCanonicalId(const std::string& sessionId)
         stateName = "Empty";
     }
     std::string message = "canonicalidchange: viewid=" + std::to_string(session->getViewId()) +
-        " canonicalid=" + std::to_string(newCanonicalId) +
+        " canonicalid=" + std::to_string(to_underlying(newCanonicalId)) +
         " viewrenderedstate=" + stateName;
     session->sendTextFrame(message);
 }
@@ -1881,6 +1897,7 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
     const bool accessibilityState = session->getAccessibilityState();
     const std::string& userTimezone = session->getTimezone();
     const std::string& userPrivateInfo = session->getUserPrivateInfo();
+    const std::string& docTemplate = session->getDocTemplate();
 
     if constexpr (!Util::isMobileApp())
         consistencyCheckFileExists(uri);
@@ -1939,13 +1956,30 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
             | LOK_FEATURE_VIEWID_IN_VISCURSOR_INVALIDATION_CALLBACK;
         _loKit->setOptionalFeatures(flags);
 
+        std::string loadUri = uri;
+
+        if (!docTemplate.empty())
+        {
+            // The template has been downloaded to 'uri'
+            // But since the template might have a different format we temporarily
+            // change the url to have the correct extension
+            // It will be saved back to 'uri' in ChildSession once loaded
+            Poco::URI pocoUri(uri), templateUri(docTemplate);
+            Poco::Path newPath(pocoUri.getPath()), templatePath(templateUri.getPath());
+            newPath.setExtension(templatePath.getExtension());
+
+            rename(pocoUri.getPath().c_str(), newPath.toString().c_str());
+            pocoUri.setPath(newPath.toString());
+            loadUri = pocoUri.toString();
+        }
+
         // Save the provided password with us and the jailed url
         _haveDocPassword = haveDocPassword;
         _docPassword = docPassword;
-        _jailedUrl = uri;
+        _jailedUrl = loadUri;
         _isDocPasswordProtected = false;
 
-        const char *pURL = uri.c_str();
+        const char* pURL = loadUri.c_str();
         LOG_DBG("Calling lokit::documentLoad(" << anonymizeUrl(pURL) << ", \"" << options << "\")");
         const auto start = std::chrono::steady_clock::now();
         _loKitDocument.reset(_loKit->documentLoad(pURL, options.c_str()));
@@ -1957,6 +1991,12 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
         LOG_DBG("Returned lokit::documentLoad(" << anonymizeUrl(pURL) << ") in " << elapsed);
 #ifdef IOS
         DocumentData::get(_mobileAppDocId).loKitDocument = _loKitDocument.get();
+        {
+            std::unique_lock<std::mutex> docBrokersLock(DocBrokersMutex);
+            auto docBrokerIt = DocBrokers.find(_docKey);
+            assert(docBrokerIt != DocBrokers.end());
+            DocumentData::get(_mobileAppDocId).docBroker = docBrokerIt->second;
+        }
 #endif
         if (!_loKitDocument || !_loKitDocument->get())
         {
@@ -2262,9 +2302,9 @@ bool Document::forwardToChild(const std::string& prefix, const std::vector<char>
     return std::string();
 }
 
-float Document::getTilePriority(const std::chrono::steady_clock::time_point &now, const TileDesc &desc) const
+TilePrioritizer::Priority Document::getTilePriority(const TileDesc &desc) const
 {
-    float maxPrio = std::numeric_limits<float>::min();
+    TilePrioritizer::Priority maxPrio = TilePrioritizer::Priority::NONE;
 
     assert(_sessions.size() > 0);
     for (const auto& it : _sessions)
@@ -2272,15 +2312,46 @@ float Document::getTilePriority(const std::chrono::steady_clock::time_point &now
         const std::shared_ptr<ChildSession> &session = it.second;
 
         // only interested in sessions that match our viewId
-        if (session->getCanonicalViewId() != desc.getNormalizedViewId())
+        if (session->getCanonicalViewId() != desc.getCanonicalViewId())
             continue;
 
-        maxPrio = std::max<int>(maxPrio, session->getTilePriority(now, desc));
+        maxPrio = std::max(maxPrio, session->getTilePriority(desc));
     }
-    if (maxPrio == std::numeric_limits<float>::min())
-        LOG_WRN("No sessions match this viewId " << desc.getNormalizedViewId());
+    if (maxPrio == TilePrioritizer::Priority::NONE)
+        LOG_WRN("No sessions match this viewId " << desc.getCanonicalViewId());
     // LOG_TRC("Priority for tile " << desc.generateID() << " is " << maxPrio);
     return maxPrio;
+}
+
+std::vector<TilePrioritizer::ViewIdInactivity> Document::getViewIdsByInactivity() const
+{
+    std::vector<TilePrioritizer::ViewIdInactivity> viewIds;
+
+    const auto now = std::chrono::steady_clock::now();
+
+    assert(_sessions.size() > 0);
+    for (const auto& it : _sessions)
+    {
+        const std::shared_ptr<ChildSession> &session = it.second;
+
+        double sessionInactivity = session->getInactivityMS(now);
+        CanonicalViewId viewId = session->getCanonicalViewId();
+
+        auto found = std::find_if(viewIds.begin(), viewIds.end(),
+                                  [viewId](const auto& entry)->bool {
+                                    return entry.first == viewId;
+                                  });
+        if (found == viewIds.end())
+            viewIds.emplace_back(viewId, sessionInactivity);
+        else if (sessionInactivity < found->second)
+            found->second = sessionInactivity;
+    }
+
+    std::sort(viewIds.begin(), viewIds.end(), [](const auto& a, const auto& b) {
+                                                return a.second < b.second;
+                                              });
+
+    return viewIds;
 }
 
 // poll is idle, are we ?
@@ -2434,11 +2505,12 @@ void Document::drainQueue()
 
         if (canRenderTiles())
         {
-            float prio = 8; // visible & intersect with an active viewport
-            while (_queue->getTileQueueSize() > 0 && prio >= 8)
+            // Priority for tiles of visible part that intersect with an active viewport
+            TilePrioritizer::Priority prio = TilePrioritizer::Priority::VERYHIGH;
+            while (!_queue->isTileQueueEmpty() && prio >= TilePrioritizer::Priority::VERYHIGH)
             {
                 TileCombined tileCombined = _queue->popTileQueue(prio);
-                LOG_TRC("Tile priority is " << prio << " for " << tileCombined.serialize());
+                LOG_TRC("Tile priority is " << static_cast<int>(prio) << " for " << tileCombined.serialize());
 
                 renderTiles(tileCombined);
             }
@@ -2606,9 +2678,9 @@ void Document::dumpState(std::ostream& oss)
 
     std::string smap;
     if (const ssize_t size = FileUtil::readFile("/proc/self/smaps_rollup", smap); size <= 0)
-        oss << "\n  smaps_rollup: <unavailable>";
+        oss << "\n\tsmaps_rollup: <unavailable>";
     else
-        oss << "\n  smaps_rollup: " << smap;
+        oss << "\n\tsmaps_rollup: " << smap;
     oss << '\n';
 
     // dumpState:
@@ -2980,6 +3052,9 @@ void documentViewCallback(const int type, const char* payload, void* data)
 /// Called by LOK main-loop the central location for data processing.
 int pollCallback(void* data, int timeoutUs)
 {
+    if (!Util::isMobileApp())
+        UnitKit::get().preKitPollCallback();
+
     if (timeoutUs < 0)
         timeoutUs = SocketPoll::DefaultPollTimeoutMicroS.count();
 #ifndef IOS
@@ -3016,13 +3091,44 @@ int pollCallback(void* data, int timeoutUs)
 }
 
 // Do we have any pending input events from coolwsd ?
-// FIXME: we could helpfully poll our incoming socket too here.
-bool anyInputCallback(void* data)
+bool anyInputCallback(void* data, int mostUrgentPriority)
 {
     auto kitSocketPoll = reinterpret_cast<KitSocketPoll*>(data);
     const std::shared_ptr<Document>& document = kitSocketPoll->getDocument();
 
-    return document && document->hasQueueItems();
+    if (document)
+    {
+        if (document->isLoaded())
+        {
+            // Check if core has high-priority tasks in which case we don't interrupt.
+            std::shared_ptr<lok::Document> kitDocument = document->getLOKitDocument();
+            // TaskPriority::HIGHEST -> TaskPriority::REPAINT
+            if (mostUrgentPriority >= 0 && mostUrgentPriority <= 4)
+            {
+                return false;
+            }
+        }
+
+        if (document->hasCallbacks())
+        {
+            // Have pending LOK callbacks from core.
+            return true;
+        }
+
+        // Poll our incoming socket from wsd.
+        int ret = kitSocketPoll->poll(std::chrono::microseconds(0), /*justPoll=*/true);
+        if (ret)
+        {
+            return true;
+        }
+
+        if (document->hasQueueItems())
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /// Called by LOK main-loop
@@ -3236,17 +3342,17 @@ void lokit_main(
             const std::string tmpSubDir = Poco::Path(tempRoot, "cool-" + jailId).toString();
             const std::string jailTmpDir = Poco::Path(jailPath, "tmp").toString();
 
-            const std::string tmpIncoming = Poco::Path(childRoot, JailUtil::CHILDROOT_TMP_INCOMING_PATH).toString();
-            const std::string sharedTemplate = Poco::Path(tmpIncoming, "templates/presnt").toString();
-            const std::string loJailDestImpressTemplatePath = Poco::Path(loJailDestPath, "share/template/common/presnt").toString();
-
             const std::string sharedPresets = Poco::Path(childRoot, JailUtil::CHILDROOT_TMP_SHARED_PRESETS_PATH).toString();
             const std::string configIdPresets = Poco::Path(sharedPresets, Uri::encode(configId)).toString();
+
             const std::string sharedAutotext = Poco::Path(configIdPresets, "autotext").toString();
             const std::string loJailDestAutotextPath = Poco::Path(loJailDestPath, "share/autotext/common").toString();
 
             const std::string sharedWordbook = Poco::Path(configIdPresets, "wordbook").toString();
             const std::string loJailDestWordbookPath = Poco::Path(loJailDestPath, "share/wordbook").toString();
+
+            const std::string sharedTemplate = Poco::Path(configIdPresets, "template").toString();
+            const std::string loJailDestImpressTemplatePath = Poco::Path(loJailDestPath, "share/template/common/presnt").toString();
 
             const std::string sysTemplateSubDir = Poco::Path(tempRoot, "systemplate-" + jailId).toString();
             const std::string jailEtcDir = Poco::Path(jailPath, "etc").toString();
@@ -3307,15 +3413,6 @@ void lokit_main(
                     return false;
                 }
 
-                // mount the shared templates over the lo shared templates' 'common' dir
-                if (!JailUtil::bind(sharedTemplate, loJailDestImpressTemplatePath) ||
-                    !JailUtil::remountReadonly(sharedTemplate, loJailDestImpressTemplatePath))
-                {
-                    LOG_WRN("Failed to mount [" << sharedTemplate << "] -> ["
-                                                << loJailDestImpressTemplatePath
-                                                << "], will link contents");
-                    return false;
-                }
 
                 if (!configId.empty())
                 {
@@ -3336,6 +3433,17 @@ void lokit_main(
                     {
                         // TODO: actually do this link on failure
                         LOG_WRN("Failed to mount [" << sharedWordbook << "] -> [" << loJailDestWordbookPath
+                                                    << "], will link contents");
+                        return false;
+
+                    }
+
+                    // mount the shared templates over the lo shared templates' 'common' dir
+                    if (!JailUtil::bind(sharedTemplate, loJailDestImpressTemplatePath) ||
+                        !JailUtil::remountReadonly(sharedTemplate, loJailDestImpressTemplatePath))
+                    {
+                        LOG_WRN("Failed to mount [" << sharedTemplate << "] -> ["
+                                                    << loJailDestImpressTemplatePath
                                                     << "], will link contents");
                         return false;
                     }
@@ -4028,7 +4136,7 @@ void dump_kit_state()
     std::ostringstream oss;
     KitSocketPoll::dumpGlobalState(oss);
 
-    oss << "\nMalloc info: \n" << Util::getMallocInfo() << '\n';
+    oss << "\nMalloc info [" << getpid() << "]: \n" << Util::getMallocInfo() << '\n';
 
     const std::string msg = oss.str();
     fprintf(stderr, "%s", msg.c_str());

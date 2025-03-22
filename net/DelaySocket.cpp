@@ -22,15 +22,15 @@ std::once_flag Delay::DelayPollOnceFlag;
 
 /// Reads from fd, delays that and then writes to _dest.
 class DelaySocket : public Socket {
-    int _delayMs;
     STATE_ENUM(State,
                ReadWrite,      // normal socket
                EofFlushWrites, // finish up writes and close
                Closed
               );
 
-    State _state;
     std::shared_ptr<DelaySocket> _dest; // our writing twin.
+    int _delayMs;
+    State _state;
 
     /// queued up data - sent to us by our opposite twin.
     struct WriteChunk {
@@ -123,7 +123,7 @@ public:
             shutdown();
             break;
         }
-        DELAY_LOG('#' << getFD() << " changed to state " << toStringShort(newState) << '\n');
+        DELAY_LOG('#' << getFD() << " changed to state " << nameShort(newState) << '\n');
         _state = newState;
     }
 

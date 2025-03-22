@@ -71,7 +71,7 @@ namespace RenderTiles
                                  size_t pixmapHeight, int pixelWidth, int pixelHeight,
                                  LibreOfficeKitTileMode mode)>& blendWatermark,
         const std::function<void(const char* buffer, size_t length)>& outputMessage,
-        [[maybe_unused]] unsigned mobileAppDocId, int canonicalViewId, bool dumpTiles)
+        [[maybe_unused]] unsigned mobileAppDocId, CanonicalViewId canonicalViewId, bool dumpTiles)
     {
         const auto& tiles = tileCombined.getTiles();
 
@@ -112,7 +112,9 @@ namespace RenderTiles
         const size_t pixmapHeight = tilesByY * pixelHeight;
 
         if (pixmapWidth > 4096 || pixmapHeight > 4096)
-            LOG_WRN("Unusual extremely large tile combine of size " << pixmapWidth << 'x' << pixmapHeight);
+            LOG_WRN("Unusual extremely large tile combine of size " << pixmapWidth << 'x' << pixmapHeight
+                    << " (" << tilesByX << 'x' << tilesByY << " tiles to serve " << tiles.size() << " tiles: "
+                    << (tiles.size() * 100)/(tilesByX * tilesByY) << "% in " << (tilesByX*tilesByY*0.25) << "MB");
 
         RenderTiles::Buffer pixmap(pixmapWidth, pixmapHeight);
 

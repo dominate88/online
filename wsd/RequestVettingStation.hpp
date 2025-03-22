@@ -21,6 +21,7 @@
 #include <string>
 
 class CheckFileInfo;
+class PresetsInstallTask;
 
 /// RequestVettingStation is used to vet the request in the background.
 /// Vetting for a WOPI request is performed through CheckFileInfo.
@@ -44,8 +45,8 @@ public:
     /// Create an instance with a SocketPoll and a RequestDetails instance.
     RequestVettingStation(const std::shared_ptr<TerminatingPoll>& poll,
                           const RequestDetails& requestDetails)
-        : _poll(poll)
-        , _requestDetails(requestDetails)
+        : _requestDetails(requestDetails)
+        , _poll(poll)
         , _mobileAppDocId(0)
     {
     }
@@ -80,7 +81,7 @@ private:
                          const std::string& url, const Poco::URI& uriPublic);
 
     void createClientSession(const std::string& docKey, const std::string& url,
-                             const Poco::URI& uriPublic, const bool isReadOnly);
+                             const Poco::URI& uriPublic, bool isReadOnly);
 
     /// Send unauthorized error to the client and disconnect the socket.
     /// Includes SSL verification status, if available, as the error code.
@@ -96,14 +97,15 @@ private:
 
     void checkFileInfo(const Poco::URI& uri, bool isReadOnly, int redirectionLimit);
     std::shared_ptr<CheckFileInfo> _checkFileInfo;
+    std::shared_ptr<PresetsInstallTask> _asyncInstallTask;
 #endif // !MOBILEAPP
 
-    Util::Stopwatch _birthday;
-    std::shared_ptr<TerminatingPoll> _poll;
-    std::string _id;
-    std::shared_ptr<WebSocketHandler> _ws;
     RequestDetails _requestDetails;
+    std::string _id;
+    std::shared_ptr<TerminatingPoll> _poll;
+    std::shared_ptr<WebSocketHandler> _ws;
     std::shared_ptr<StreamSocket> _socket;
-    unsigned _mobileAppDocId;
     std::shared_ptr<DocumentBroker> _docBroker;
+    Util::Stopwatch _birthday;
+    unsigned _mobileAppDocId;
 };

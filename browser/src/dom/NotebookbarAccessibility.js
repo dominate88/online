@@ -364,7 +364,7 @@ var NotebookbarAccessibility = function() {
 		for (var tabId in this.tabInfoList) {
 			if (Object.prototype.hasOwnProperty.call(this.tabInfoList, tabId)) {
 				var element = document.getElementById(tabId);
-				if (element && !element.classList.contains('hidden')) {
+				if (element && element.offsetParent !== null) {
 					element.accessKey = this.tabInfoList[tabId].combination;
 					this.addInfoBox(element);
 				}
@@ -414,7 +414,7 @@ var NotebookbarAccessibility = function() {
 
 	this.initialize = function() {
 		setTimeout(function() {
-			if (window.mode.isDesktop()) {
+			if (window.mode.isDesktop() && !this.initialized) {
 				if (document.body.dataset.userinterfacemode === 'notebookbar') {
 					this.tabInfoList = this.definitions.getDefinitions();
 

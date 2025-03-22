@@ -17,7 +17,7 @@ endif
 AM_CXXFLAGS = $(CPPUNIT_CFLAGS) -DTDOC=\"$(abs_top_srcdir)/test/data\" -DTDIST=\"$(DIST_FOLDER)\" \
 	-I${top_srcdir}/common -I${top_srcdir}/net -I${top_srcdir}/wsd -I${top_srcdir}/kit \
 	-I${top_srcdir} -I${top_srcdir}/test \
-	-pthread -DCOOLWSD_DATADIR='"@COOLWSD_DATADIR@"' \
+	-DCOOLWSD_DATADIR='"@COOLWSD_DATADIR@"' \
 	-DCOOLWSD_CONFIGDIR='"@COOLWSD_CONFIGDIR@"' \
 	-DCOOLWSD_LOGLEVEL='"@COOLWSD_LOGLEVEL@"' \
 	-DDEBUG_ABSSRCDIR='"@abs_srcdir@"' \
@@ -81,6 +81,7 @@ all_la_unit_tests = \
 	unit-render-search-result.la \
 	unit-tiff-load.la \
 	unit-save.la \
+	unit-any-input.la \
 	unit-wopi-saveas-with-encoded-file-name.la \
 	unit-storage.la \
 	unit-wopi-async-upload-modifyclose.la \
@@ -106,13 +107,14 @@ if ENABLE_LIBFUZZER
 all_la_unit_tests += unit-fuzz.la
 endif
 
-noinst_LTLIBRARIES = ${all_la_unit_tests}
+check_LTLIBRARIES = ${all_la_unit_tests}
 
 MAGIC_TO_FORCE_SHLIB_CREATION = -rpath /dummy
 AM_LDFLAGS = -module $(MAGIC_TO_FORCE_SHLIB_CREATION) $(ZLIB_LIBS) $(ZSTD_LIBS) ${PNG_LIBS}
 
 # Clang's linker doesn't like -pthread.
 if !HAVE_CLANG
+AM_CXXFLAGS += -pthread
 AM_LDFLAGS += -pthread
 endif
 
@@ -136,9 +138,11 @@ wsd_sources = \
 	../wsd/TileCache.cpp
 
 test_base_sources = \
+	KitQueueTests.cpp \
 	RequestDetailsTests.cpp \
 	StringVectorTests.cpp \
 	FileServeWhiteBoxTests.cpp \
+	NetUtilWhiteBoxTests.cpp \
 	WhiteBoxTests.cpp \
 	HttpWhiteBoxTests.cpp \
 	DeltaTests.cpp \
@@ -146,8 +150,6 @@ test_base_sources = \
 	WopiProofTests.cpp \
 	UriTests.cpp \
 	$(wsd_sources)
-
-# test_base_sources += KitQueueTests.cpp
 
 common_sources = \
 	../common/Authorization.cpp \
@@ -296,6 +298,8 @@ unit_tiff_load_la_SOURCES = UnitTiffLoad.cpp
 unit_tiff_load_la_LIBADD = $(CPPUNIT_LIBS)
 unit_save_la_SOURCES = UnitSave.cpp
 unit_save_la_LIBADD = $(CPPUNIT_LIBS)
+unit_any_input_la_SOURCES = UnitAnyInput.cpp
+unit_any_input_la_LIBADD = $(CPPUNIT_LIBS)
 unit_large_paste_la_SOURCES = UnitLargePaste.cpp
 unit_large_paste_la_LIBADD = $(CPPUNIT_LIBS)
 unit_paste_la_SOURCES = UnitPaste.cpp

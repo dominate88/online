@@ -19,7 +19,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 
 	getShortcutsBarData: function() {
 		return [
-			!this._map['wopi'].HideSaveOption ?
+			!this.map['wopi'].HideSaveOption ?
 				{
 					'id': 'shortcutstoolbox',
 					'type': 'toolbox',
@@ -29,7 +29,8 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 							'type': 'toolitem',
 							'text': _('Save'),
 							'command': '.uno:Save',
-							'accessKey': '1'
+							'accessKey': '1',
+							'isCustomTooltip': true
 						}
 					]
 				} : {}
@@ -37,38 +38,56 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 	},
 
 	getOptionsSectionData: function() {
-		return this.buildOptionsSectionData([
+		return this.buildOptionsSectionData(this.getDefaultToolItems());
+	},
+
+	getDefaultToolItems: function() {
+		const optionsToolItems = [
 			{
 				'id': 'options-modify-page',
 				'type': 'toolitem',
 				'text': _UNO('.uno:ModifyPage', 'presentation', true),
-				'command': '.uno:ModifyPage'
+				'command': '.uno:ModifyPage',
+				'accessibility': { focusBack: true, combination: 'ZL', de: null }
 			},
 			{
 				'id': 'options-slide-change-window',
 				'type': 'toolitem',
 				'text': _UNO('.uno:SlideChangeWindow', 'presentation', true),
-				'command': '.uno:SlideChangeWindow'
+				'command': '.uno:SlideChangeWindow',
+				'accessibility': { focusBack: true, combination: 'ZT', de: null }
 			},
 			{
 				'id': 'options-custom-animation',
 				'type': 'toolitem',
 				'text': _UNO('.uno:CustomAnimation', 'presentation', true),
-				'command': '.uno:CustomAnimation'
+				'command': '.uno:CustomAnimation',
+				'accessibility': { focusBack: true, combination: 'ZA', de: null }
 			},
 			{
 				'id': 'options-master-slides-panel',
 				'type': 'toolitem',
 				'text': _UNO('.uno:MasterSlidesPanel', 'presentation', true),
-				'command': '.uno:MasterSlidesPanel'
+				'command': '.uno:MasterSlidesPanel',
+				'accessibility': { focusBack: true, combination: 'ZM', de: null }
 			},
 			{
 				'id': 'options-navigator',
 				'type': 'toolitem',
 				'text': _UNO('.uno:Navigator'),
-				'command': '.uno:Navigator'
+				'command': '.uno:Navigator',
+				'accessibility': { focusBack: false, combination: 'ZN', de: 'V' }
 			}
-		]);
+		];
+		if (this._map && this._map['wopi'].EnableShare) {
+			optionsToolItems.push({
+				'type': 'customtoolitem',
+				'text': _('Share'),
+				'command': 'shareas',
+				'accessibility': { focusBack: false, combination: 'ZS', de: null }
+			});
+		}
+		return optionsToolItems;
 	},
 
 	getTabs: function() {
@@ -146,27 +165,30 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 		];
 	},
 
-	getFullJSON: function(selectedId) {
-		return this.getNotebookbar(
-			[
-				this.getFileTab(),
-				this.getHomeTab(),
-				this.getInsertTab(),
-				this.getLayoutTab(),
-				this.getReviewTab(),
-				this.getFormatTab(),
-				this.getTableTab(),
-				this.getDrawTab(),
-				this.getMasterTab(),
-				this.getViewTab(),
-				this.getHelpTab()
-			], selectedId);
+	getTabsJSON: function () {
+		return [
+			this.getFileTab(),
+			this.getHomeTab(),
+			this.getInsertTab(),
+			this.getLayoutTab(),
+			this.getReviewTab(),
+			this.getFormatTab(),
+			this.getTableTab(),
+			this.getDrawTab(),
+			this.getMasterTab(),
+			this.getViewTab(),
+			this.getHelpTab()
+		];
+	},
+
+	getFullJSON: function (selectedId) {
+		return this.getNotebookbar(this.getTabsJSON(), selectedId);
 	},
 
 	getFileTab: function() {
 		var content = [];
 
-		if (!this._map['wopi'].HideSaveOption) {
+		if (!this.map['wopi'].HideSaveOption) {
 			content.push(
 			{
 				'type': 'toolbox',
@@ -182,7 +204,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 			});
 		}
 
-		if (!this._map['wopi'].UserCanNotWriteRelative) {
+		if (!this.map['wopi'].UserCanNotWriteRelative) {
 			content.push(
 				(window.prefs.get('saveAsMode') === 'group') ?
 				{
@@ -203,7 +225,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 			);
 		}
 
-		if (!this._map['wopi'].UserCanNotWriteRelative) {
+		if (!this.map['wopi'].UserCanNotWriteRelative) {
 			content.push(
 			{
 				'id': 'exportas:ExportAsMenu',
@@ -220,7 +242,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 				'id': 'file-shareas-rev-history',
 				'type': 'container',
 				'children': [
-					(this._map['wopi'].EnableShare) ?
+					(this.map['wopi'].EnableShare) ?
 						{
 							'id': 'ShareAs',
 							'class': 'unoShareAs',
@@ -245,7 +267,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 			}
 		);
 
-		if (!this._map['wopi'].HidePrintOption) {
+		if (!this.map['wopi'].HidePrintOption) {
 			content.push(
 			{
 				'id': 'file-print:PrintOptions',
@@ -272,7 +294,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 			});
 		}
 
-		if (!this._map['wopi'].HideExportOption) {
+		if (!this.map['wopi'].HideExportOption) {
 			content.push({
 				'id': 'downloadas:DownloadAsMenu',
 				'command': 'downloadas',
@@ -283,7 +305,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 			});
 		}
 
-		if (!this._map['wopi'].HideRepairOption) {
+		if (!this.map['wopi'].HideRepairOption) {
 			content.push({
 				'type': 'container',
 				'children': [
@@ -325,19 +347,21 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 				]
 			});
 		}
-		content.push(
-			{
-				'type': 'container',
-				'children': [
-					{
-						'id': 'renamedocument',
-						'class': 'unoRenameDocument',
-						'type': 'bigcustomtoolitem',
-						'text': _('Rename'),
-					}
-				]
-			}
-		);
+		if (this._map['wopi']._supportsRename() && this._map['wopi'].UserCanRename) {
+			content.push(
+				{
+					'type': 'container',
+					'children': [
+						{
+							'id': 'renamedocument',
+							'class': 'unoRenameDocument',
+							'type': 'bigcustomtoolitem',
+							'text': _('Rename'),
+						}
+					]
+				}
+			);
+		}
 
 		return this.getTabPage('File', content);
 	},
@@ -699,7 +723,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 										'text': _UNO('.uno:FontworkGalleryFloater'),
 										'command': '.uno:FontworkGalleryFloater',
 										// Fontwork export/import not supported in other formats.
-										'visible': (app.LOUtil.isFileODF(this._map)) ? 'true' : 'false',
+										'visible': (app.LOUtil.isFileODF(this.map)) ? 'true' : 'false',
 										'accessibility': { focusBack: true, combination: 'FL', de: null }
 									},
 									{
@@ -1223,7 +1247,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 				],
 				'vertical': 'true'
 			},
-			(this._map['wopi'].EnableRemoteLinkPicker) ? {
+			(this.map['wopi'].EnableRemoteLinkPicker) ? {
 				'type': 'container',
 				'children': [
 					{
@@ -1262,7 +1286,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 				'command': 'hyperlinkdialog',
 				'accessibility': { focusBack: true, combination: 'IL', de: null }
 			},
-			(this._map['wopi'].EnableRemoteAIContent) ? {
+			(this.map['wopi'].EnableRemoteAIContent) ? {
 				'id': 'insert-insert-remote-ai-content',
 				'class': 'unoremoteaicontent',
 				'type': 'bigcustomtoolitem',
@@ -1392,7 +1416,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 								'text': _UNO('.uno:FontworkGalleryFloater'),
 								'command': '.uno:FontworkGalleryFloater',
 								// Fontwork export/import not supported in other formats.
-								'visible': app.LOUtil.isFileODF(this._map) ? 'true' : 'false',
+								'visible': app.LOUtil.isFileODF(this.map) ? 'true' : 'false',
 								'accessibility': { focusBack: true, combination: 'FW', de: null }
 							}
 						]
@@ -2455,7 +2479,7 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 								'text': _UNO('.uno:FontworkGalleryFloater'),
 								'command': '.uno:FontworkGalleryFloater',
 								// Fontwork export/import not supported in other formats.
-								'visible': (app.LOUtil.isFileODF(this._map)) ? 'true' : 'false',
+								'visible': (app.LOUtil.isFileODF(this.map)) ? 'true' : 'false',
 								'accessibility': { focusBack: true, combination: 'FW', de: null }
 							}
 						]
@@ -2475,6 +2499,12 @@ L.Control.NotebookbarImpress = L.Control.NotebookbarWriter.extend({
 					}
 				],
 				'vertical': 'true'
+			},
+			{
+				'type': 'bigtoolitem',
+				'text': _UNO('.uno:Crop'),
+				'command': '.uno:Crop',
+				'context': 'Graphic'
 			},
 		];
 

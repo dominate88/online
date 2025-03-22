@@ -362,7 +362,7 @@ function documentChecks(skipInitializedCheck = false) {
 		doIfOnDesktop(function() {
 			var showSidebar = localStorage.getItem('text.ShowSidebar');
 			if (Cypress.env('pdf-view') !== true && showSidebar !== 'false')
-				cy.cframe().find('#sidebar-panel').should('be.visible');
+				cy.cframe().find('#sidebar-panel').should('be.visible').should('not.be.empty');
 
 			// Check that the document does not take the whole window width.
 			cy.window()
@@ -1074,16 +1074,10 @@ function typeIntoInputField(selector, text, clearBefore = true)
 {
 	cy.log('>> typeIntoInputField - start');
 
-	cy.cGet(selector).as('input');
-	cy.get('@input').focus();
-	cy.get('@input').should('have.focus');
-	if (clearBefore) {
-		cy.get('@input').invoke('val', '');
-		cy.get('@input').should('have.value', '');
-	}
-
-	cy.get('@input').type(text + '{enter}');
-	cy.get('@input').should('have.value', text);
+	cy.wait(600);
+	cy.cGet(selector).type((clearBefore ? '{selectall}{backspace}' : '') + text + '{enter}');
+	cy.wait(600);
+	cy.cGet(selector).should('have.value', text);
 
 	cy.log('<< typeIntoInputField - end');
 }
@@ -1210,6 +1204,25 @@ function getSubFolder(filePath) {
 	return subFolder;
 }
 
+/*
+ * Assert image svg
+ */
+function assertImageSize(expectedWidth, expectedHeight) {
+	cy.log('>> assertImageSize - start');
+
+	cy.cGet('#canvas-container > svg')
+		.then(function (element) {
+			expect(element).to.have.length(1);
+			const actualWidth = parseInt(element[0].style.width.replace('px', ''));
+			const actualHeight = parseInt(element[0].style.height.replace('px', ''));
+
+			expect(actualWidth).to.be.closeTo(expectedWidth, 10);
+			expect(actualHeight).to.be.closeTo(expectedHeight, 10);
+		});
+
+	cy.log('<< assertImageSize - end');
+}
+
 module.exports.setupDocument = setupDocument;
 module.exports.loadDocument = loadDocument;
 module.exports.setupAndLoadDocument = setupAndLoadDocument;
@@ -1258,3 +1271,4 @@ module.exports.copy = copy;
 module.exports.getFileName = getFileName;
 module.exports.getSubFolder = getSubFolder;
 module.exports.addressInputSelector = "#addressInput input";
+module.exports.assertImageSize = assertImageSize;

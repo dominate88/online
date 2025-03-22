@@ -110,40 +110,38 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 		];
 	},
 
-	getFullJSON: function(selectedId) {
-		var t = this.getNotebookbar(
-			[
-				this.getFileTab(),
-				this.getHomeTab(),
-				this.getInsertTab(),
-				this.getLayoutTab(),
-				this.getReferencesTab(),
-				this.getReviewTab(),
-				this.getFormatTab(),
-				this.getFormTab(),
-				this.getTableTab(),
-				this.getDrawTab(),
-				this.getViewTab(),
-				this.getHelpTab()
-			 ], selectedId);
+	getTabsJSON: function () {
+		return [
+			this.getFileTab(),
+			this.getHomeTab(),
+			this.getInsertTab(),
+			this.getLayoutTab(),
+			this.getReferencesTab(),
+			this.getReviewTab(),
+			this.getFormatTab(),
+			this.getFormTab(),
+			this.getTableTab(),
+			this.getDrawTab(),
+			this.getViewTab(),
+			this.getHelpTab()
+		]
+	},
 
-		return t;
+	getFullJSON: function (selectedId) {
+		return this.getNotebookbar(this.getTabsJSON(), selectedId);
 	},
 
 	getFileTab: function() {
 		var hasRevisionHistory = L.Params.revHistoryEnabled;
-		var hasPrint = !this._map['wopi'].HidePrintOption;
-		var hasRepair = !this._map['wopi'].HideRepairOption;
-		var hasSaveAs = !this._map['wopi'].UserCanNotWriteRelative;
-		var hasShare = this._map['wopi'].EnableShare;
-		var hideDownload = this._map['wopi'].HideExportOption;
+		var hasPrint = !this.map['wopi'].HidePrintOption;
+		var hasRepair = !this.map['wopi'].HideRepairOption;
+		var hasSaveAs = !this.map['wopi'].UserCanNotWriteRelative;
+		var hasShare = this.map['wopi'].EnableShare;
+		var hideDownload = this.map['wopi'].HideExportOption;
 		var hasGroupedSaveAs = window.prefs.get('saveAsMode') === 'group';
 		var hasRunMacro = window.enableMacrosExecution;
-		var hasSave = !this._map['wopi'].HideSaveOption;
+		var hasSave = !this.map['wopi'].HideSaveOption;
 		var content = [];
-
-
-		content = [];
 
 		if (hasSave) {
 			content.push({
@@ -327,18 +325,20 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 			});
 		}
 
-		content.push({
-			'type': 'container',
-			'children': [
-				{
-					'id': 'renamedocument',
-					'class': 'unoRenameDocument',
-					'type': 'bigcustomtoolitem',
-					'text': _('Rename'),
-					'accessibility': { focusBack: true,	combination: 'RN' }
-				}
-			]
-		});
+		if (this._map['wopi']._supportsRename() && this._map['wopi'].UserCanRename) {
+			content.push({
+				'type': 'container',
+				'children': [
+					{
+						'id': 'renamedocument',
+						'class': 'unoRenameDocument',
+						'type': 'bigcustomtoolitem',
+						'text': _('Rename'),
+						'accessibility': { focusBack: true,	combination: 'RN' }
+					}
+				]
+			});
+		}
 
 		if (window.wasmEnabled) {
 			content.push({
@@ -360,11 +360,11 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 
 	getHelpTab: function() {
 		var hasLatestUpdates = window.enableWelcomeMessage;
-		var hasFeedback = this._map.feedback;
+		var hasFeedback = this.map.feedback;
 		var hasAccessibilitySupport = window.enableAccessibility;
-		var hasAccessibilityCheck = this._map.getDocType() === 'text';
+		var hasAccessibilityCheck = this.map.getDocType() === 'text';
 		var hasAbout = L.DomUtil.get('about-dialog') !== null;
-		var hasServerAudit = !!this._map.serverAuditDialog;
+		var hasServerAudit = !!this.map.serverAuditDialog;
 
 		var content = [
 			{
@@ -1078,7 +1078,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 	},
 
 	getInsertTab: function() {
-		var isODF = app.LOUtil.isFileODF(this._map);
+		var isODF = app.LOUtil.isFileODF(this.map);
 		var content = [
 			{
 				'id': 'insert-insert-page-break',
@@ -1132,7 +1132,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				],
 				'vertical': 'true'
 			},
-			(this._map['wopi'].EnableRemoteLinkPicker) ? {
+			(this.map['wopi'].EnableRemoteLinkPicker) ? {
 				'type': 'container',
 				'children': [
 					{
@@ -1171,7 +1171,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				'command': 'hyperlinkdialog',
 				'accessibility': { focusBack: false,	combination: 'ZL',	de:	'8' }
 			},
-			(this._map['wopi'].EnableRemoteAIContent) ? {
+			(this.map['wopi'].EnableRemoteAIContent) ? {
 				'id': 'insert-insert-remote-ai-content',
 				'class': 'unoremoteaicontent',
 				'type': 'bigcustomtoolitem',
@@ -1996,7 +1996,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				'vertical': 'true'
 			}
 		];
-		if (this._map.zotero) {
+		if (this.map.zotero) {
 			content.push(
 				{
 					'id': 'zoteroaddeditbibliography',
@@ -2263,8 +2263,8 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				'vertical': 'true'
 			},
 			{
-				'id': 'review-track-changes',
-				'type': 'bigtoolitem',
+				'id': 'review-track-changes:RecordTrackedChangesMenu',
+				'type': 'menubutton',
 				'text': _UNO('.uno:TrackChanges', 'text'),
 				'command': '.uno:TrackChanges',
 				'accessibility': { focusBack: true, combination: 'TC', de: null }
@@ -2675,7 +2675,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 	},
 
 	getDrawTab: function() {
-		var isODF = app.LOUtil.isFileODF(this._map);
+		var isODF = app.LOUtil.isFileODF(this.map);
 		var content = [
 			{
 				'type': 'bigtoolitem',
@@ -2958,6 +2958,12 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				],
 				'vertical': 'true'
 			},
+			{
+				'type': 'bigtoolitem',
+				'text': _UNO('.uno:Crop'),
+				'command': '.uno:Crop',
+				'context': 'Graphic'
+			},
 		];
 
 		return this.getTabPage(drawTabName, content);
@@ -3002,7 +3008,7 @@ L.Control.NotebookbarWriter = L.Control.Notebookbar.extend({
 				return null;
 			}
 
-			var uiManager = that._map.uiManager;
+			var uiManager = that.map.uiManager;
 			if (!uiManager.isButtonVisible(c.id)) {
 				return null;
 			}

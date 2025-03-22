@@ -583,8 +583,7 @@ void UnitBase::exitTest(TestResult result, const std::string& reason)
 std::string UnitKit::getResultMessage() const
 {
     assert(isFinished());
-    return std::string("unitresult: ") +
-        toStringShort(_result) + " " + _reason;
+    return std::string("unitresult: ") + std::string(nameShort(_result)) + " " + _reason;
 }
 
 void UnitWSD::processUnitResult(const StringVector &tokens)
@@ -633,8 +632,8 @@ void UnitBase::endTest([[maybe_unused]] const std::string& reason)
 
 UnitWSD::UnitWSD(const std::string& name)
     : UnitBase(name, UnitType::Wsd)
-    , _hasKitHooks(false)
     , _wsd(nullptr)
+    , _hasKitHooks(false)
 {
 }
 

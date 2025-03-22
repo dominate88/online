@@ -34,8 +34,8 @@ class PreloadMapSection extends app.definitions.canvasSectionObject {
 		var zoom = Math.round(this._map.getZoom());
 		var part = docLayer._selectedPart;
 		var tileRanges = ctx.paneBoundsList.map(
-			docLayer._pxBoundsToTileRange,
-			docLayer,
+			TileManager.pxBoundsToTileRange,
+			TileManager,
 		);
 
 		// Get the 'main' view
@@ -47,12 +47,12 @@ class PreloadMapSection extends app.definitions.canvasSectionObject {
 
 		// stop annoying jitter as the view fits different numbers of tiles.
 		var viewWidth = Math.floor(
-			(this._map.getPixelBoundsCore().getSize().x + docLayer._tileSize - 1) /
-				docLayer._tileSize,
+			(this._map.getPixelBoundsCore().getSize().x + TileManager.tileSize - 1) /
+				TileManager.tileSize,
 		);
 		var viewHeight = Math.floor(
-			(this._map.getPixelBoundsCore().getSize().y + docLayer._tileSize - 1) /
-				docLayer._tileSize,
+			(this._map.getPixelBoundsCore().getSize().y + TileManager.tileSize - 1) /
+				TileManager.tileSize,
 		);
 
 		// writer defaults
@@ -99,18 +99,16 @@ class PreloadMapSection extends app.definitions.canvasSectionObject {
 			var range = partBounds[p];
 			for (var j = range.min.y; j <= range.max.y; ++j) {
 				for (var i: number = range.min.x; i <= range.max.x; ++i) {
-					var tile = undefined;
-
 					if (i >= 0 && j >= 0 && range.part >= 0) {
-						var coords = new L.TileCoordData(
-							i * ctx.tileSize.x,
-							j * ctx.tileSize.y,
+						var coords = new TileCoordData(
+							i * TileManager.tileSize,
+							j * TileManager.tileSize,
 							zoom,
 							range.part,
 							docLayer._selectedMode,
 						);
 						var key = coords.key();
-						tile = docLayer._tiles[key];
+						const tile: Tile = TileManager.get(key);
 
 						if (!tile)
 							canvas.fillStyle = 'rgba(128, 128, 128, 0.5)'; // grey

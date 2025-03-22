@@ -40,7 +40,7 @@ JSDialog.comboboxEntry = function (parentContainer, data, builder) {
 
 	if (data.icon) {
 		var icon = L.DomUtil.create('img', 'ui-combobox-icon', entry);
-		builder._isStringCloseToURL(data.icon) ? icon.src = data.icon : app.LOUtil.setImage(icon,  builder._createIconURL(data.icon), builder.map);
+		builder._isStringCloseToURL(data.icon) ? icon.src = data.icon : app.LOUtil.setImage(icon,  app.LOUtil.getIconNameOfCommand(data.icon), builder.map);
 	}
 
 	if (data.hint) {
@@ -187,6 +187,7 @@ JSDialog.combobox = function (parentContainer, data, builder) {
 	content.id = data.id + '-input';
 	content.value = data.text;
 	content.role = 'combobox';
+	content.setAttribute('autocomplete', 'off');
 
 	if (data.aria) {
 		content.setAttribute('aria-label',data.aria.label);

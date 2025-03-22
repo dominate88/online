@@ -18,12 +18,6 @@
 #include <common/Unit.hpp>
 #include <common/Util.hpp>
 
-#include <climits>
-#include <fstream>
-#include <memory>
-#include <sstream>
-#include <string_view>
-
 #define LOK_USE_UNSTABLE_API
 #include <LibreOfficeKit/LibreOfficeKitEnums.h>
 
@@ -43,6 +37,7 @@
 #include <androidapp.hpp>
 #endif
 
+#include <wasm/base64.hpp>
 #include <common/ConfigUtil.hpp>
 #include <common/FileUtil.hpp>
 #include <common/JsonUtil.hpp>
@@ -53,12 +48,19 @@
 #include "KitHelper.hpp"
 #include <Png.hpp>
 #include <Clipboard.hpp>
-#include <string>
 #include <CommandControl.hpp>
 
 #ifdef IOS
 #include "DocumentViewController.h"
 #endif
+
+#include <climits>
+#include <fstream>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <utility>
 
 using Poco::JSON::Object;
 using Poco::JSON::Parser;
@@ -67,18 +69,6 @@ using Poco::URI;
 using namespace COOLProtocol;
 
 bool ChildSession::NoCapsForKit = false;
-
-namespace {
-
-std::vector<unsigned char> decodeBase64(const std::string & inputBase64)
-{
-    std::istringstream stream(inputBase64);
-    Poco::Base64Decoder base64Decoder(stream);
-    std::istreambuf_iterator<char> eos;
-    return std::vector<unsigned char>(std::istreambuf_iterator<char>(base64Decoder), eos);
-}
-
-}
 
 namespace {
 
@@ -113,7 +103,7 @@ ChildSession::ChildSession(const std::shared_ptr<ProtocolHandlerInterface>& prot
     , _currentPart(-1)
     , _isDocLoaded(false)
     , _copyToClipboard(false)
-    , _canonicalViewId(-1)
+    , _canonicalViewId(CanonicalViewId::Invalid)
     , _isDumpingTiles(false)
     , _clientVisibleArea(0, 0, 0, 0)
     , _URPContext(nullptr)
@@ -151,7 +141,7 @@ void ChildSession::disconnect()
     {
         if (_viewId >= 0)
         {
-            if (_docManager)
+            if (_docManager != nullptr)
             {
                 _docManager->onUnload(*this);
 
@@ -732,10 +722,11 @@ bool ChildSession::_handleInput(const char *buffer, int length)
                     LogUiCommands uiLog(this);
                     uiLog.logSaveLoad("save", Poco::URI(getJailedFilePath()).getPath(), timeStart);
                 }
+
                 return result;
             }
-            else
-                return true;
+
+            return true;
         }
         else if (tokens.equals(0, "selecttext"))
         {
@@ -931,8 +922,8 @@ bool ChildSession::loadDocument(const StringVector& tokens)
         return false;
     }
 
-    std::string timestamp, doctemplate;
-    parseDocOptions(tokens, part, timestamp, doctemplate);
+    std::string timestamp;
+    parseDocOptions(tokens, part, timestamp);
 
     std::string renderOpts;
     if (!getDocOptions().empty())
@@ -972,9 +963,9 @@ bool ChildSession::loadDocument(const StringVector& tokens)
     assert(getLOKitDocument() && "Expected valid LOKitDocument instance");
     LOG_INF("Created new view with viewid: [" << _viewId << "] for username: ["
                                               << getUserNameAnonym() << "] in session: [" << getId()
-                                              << "], template: [" << doctemplate << ']');
+                                              << "], template: [" << getDocTemplate() << ']');
 
-    if (!doctemplate.empty())
+    if (!getDocTemplate().empty())
     {
         static constexpr auto Protocol = "file://";
 
@@ -1285,39 +1276,34 @@ bool ChildSession::clientVisibleArea(const StringVector& tokens)
     return true;
 }
 
-float ChildSession::getTilePriority(const std::chrono::steady_clock::time_point &now, const TileDesc &tile) const
+TilePrioritizer::Priority ChildSession::getTilePriority(const TileDesc &tile) const
 {
-    float score = tile.intersects(_clientVisibleArea) ? 2.0 : 1.0;
+    // previews are least interesting
+    if (tile.isPreview())
+        return TilePrioritizer::Priority::LOWEST;
+
+    // different part less interesting than session's current part
+    if (tile.getPart() != _currentPart)
+        return TilePrioritizer::Priority::LOW;
 
     // most important to render things close to the cursor fast
-    if (tile.getPart() == _currentPart)
-    {
-        if (tile.intersects(_cursorPosition))
-            score *= 2.0;
+    if (tile.intersects(_cursorPosition))
+        return TilePrioritizer::Priority::ULTRAHIGH;
 
-        // interacted with the keyboard/mouse recently ?
-        if (getInactivityMS(now) < 200 /* ms */) // typing etc.
-            score *= 2.0;
+    // inside viewing area more important than outside it
+    if (tile.intersects(_clientVisibleArea))
+        return TilePrioritizer::Priority::VERYHIGH;
 
-        // pre-loading near the viewing area is also more important than far away
-        Util::Rectangle r = tile.toAABBox();
-        // grow in each direction
-        Util::Rectangle enlarged =
-            Util::Rectangle::create(r.getLeft() - r.getWidth(), r.getTop() - r.getHeight(),
-                                    r.getRight() + r.getWidth(), r.getBottom() + r.getHeight());
-        if (enlarged.intersects(_clientVisibleArea))
-            score *= 2.0;
-    }
+    // pre-loading near the viewing area is also more important than far away
+    Util::Rectangle r = tile.toAABBox();
+    // grow in each direction
+    Util::Rectangle enlarged =
+        Util::Rectangle::create(r.getLeft() - r.getWidth(), r.getTop() - r.getHeight(),
+                                r.getRight() + r.getWidth(), r.getBottom() + r.getHeight());
+    if (enlarged.intersects(_clientVisibleArea))
+        return TilePrioritizer::Priority::HIGH;
 
-    // previews are less interesting
-    if (tile.isPreview())
-        score /= 2.0;
-
-    // readonly viewers are also less high priority
-    else if (isReadOnly())
-        score /= 2;
-
-    return score;
+    return TilePrioritizer::Priority::NORMAL;
 }
 
 bool ChildSession::outlineState(const StringVector& tokens)
@@ -1783,11 +1769,12 @@ bool ChildSession::insertFile(const StringVector& tokens)
         else
         {
             assert(type == "graphic" || type == "multimedia");
-            auto binaryData = decodeBase64(data);
+            std::string binaryData;
+            macaron::Base64::Decode(data, binaryData);
             const std::string tempFile = FileUtil::createRandomTmpDir() + '/' + name;
             std::ofstream fileStream;
             fileStream.open(tempFile);
-            fileStream.write(reinterpret_cast<char*>(binaryData.data()), binaryData.size());
+            fileStream.write(binaryData.data(), binaryData.size());
             fileStream.close();
             url = "file://" + tempFile;
         }
@@ -2723,18 +2710,16 @@ namespace
 
 std::string extractCertificate(const std::string & certificate)
 {
-    const std::string header("-----BEGIN CERTIFICATE-----");
-    const std::string footer("-----END CERTIFICATE-----");
-
-    std::string result;
+    constexpr std::string_view header("-----BEGIN CERTIFICATE-----");
+    constexpr std::string_view footer("-----END CERTIFICATE-----");
 
     size_t pos1 = certificate.find(header);
     if (pos1 == std::string::npos)
-        return result;
+        return std::string();
 
     size_t pos2 = certificate.find(footer, pos1 + 1);
     if (pos2 == std::string::npos)
-        return result;
+        return std::string();
 
     pos1 = pos1 + header.length();
     pos2 = pos2 - pos1;
@@ -2764,10 +2749,11 @@ bool ChildSession::askSignatureStatus(const char* buffer, int length, const Stri
                 return false;
 
             std::string chainCertificate = rChainPtr;
-            std::vector<unsigned char> binaryChainCertificate = decodeBase64(extractCertificate(chainCertificate));
+            std::string binaryChainCertificate;
+            macaron::Base64::Decode(extractCertificate(chainCertificate), binaryChainCertificate);
 
             bResult = getLOKitDocument()->addCertificate(
-                binaryChainCertificate.data(),
+                reinterpret_cast<const unsigned char*>(binaryChainCertificate.data()),
                 binaryChainCertificate.size());
 
             if (!bResult)
@@ -3343,7 +3329,7 @@ std::string ChildSession::getBlockedCommandType(std::string command)
         CommandControl::LockManager::getLockedCommandList().end())
         return "locked";
 
-    return "";
+    return std::string();
 }
 #endif
 
@@ -3382,12 +3368,14 @@ void ChildSession::loKitCallback(const int type, const std::string& payload)
         LOG_TRC("Skipping callback [" << typeName << "] on closing session " << getName());
         return;
     }
-    else if (isDisconnected())
+
+    if (isDisconnected())
     {
         LOG_TRC("Skipping callback [" << typeName << "] on disconnected session " << getName());
         return;
     }
-    else if (!isActive())
+
+    if (!isActive())
     {
         rememberEventsForInactiveUser(type, payload);
 
@@ -3826,7 +3814,7 @@ void ChildSession::loKitCallback(const int type, const std::string& payload)
         });
 #else
         // Register download id -> URL mapping in the DocumentBroker
-        auto url = std::string("../../") + payload.substr(payload.find_last_of("/"));
+        auto url = std::string("../../") + payload.substr(payload.find_last_of('/'));
         auto downloadId = Util::rng::getFilename(64);
         std::string docBrokerMessage = "registerdownload: downloadid=" + downloadId + " url=" + url + " clientid=" + getId();
         _docManager->sendFrame(docBrokerMessage.c_str(), docBrokerMessage.length());
@@ -3893,6 +3881,13 @@ void LogUiCommands::logLine(LogUiCommandsLine &line, bool isUndoChange)
 {
     // log command
     double timeDiffStart = std::chrono::duration<double>(line._timeStart - _session->_docManager->getLogUiCmd().getKitStartTimeSec()).count();
+
+    // Load / Save event made by application will reach here.
+    // In that case save without real userID
+    int userID = _session->_viewId;
+    if (_session->_clientVisibleArea.getWidth() == 0)
+        userID = -1;
+
     std::stringstream strToLog;
     strToLog << "kit=" << _session->_docManager->getDocId();
     strToLog << " time=" << std::fixed << std::setprecision(3) << timeDiffStart;
@@ -3901,7 +3896,7 @@ void LogUiCommands::logLine(LogUiCommandsLine &line, bool isUndoChange)
         double timeDiffEnd = std::chrono::duration<double>(line._timeEnd - line._timeStart).count();
         strToLog << " dur=" << std::fixed << std::setprecision(3) << timeDiffEnd;
     }
-    strToLog << " user=" << _session->_viewId;
+    strToLog << " user=" << userID;
     if (!isUndoChange)
     {
         strToLog << " rep=" << line._repeat;
@@ -3925,7 +3920,7 @@ void LogUiCommands::logLine(LogUiCommandsLine &line, bool isUndoChange)
         }
     }
 
-    _session->_docManager->getLogUiCmd().logUiCmdLine(_session->_viewId, strToLog.str());
+    _session->_docManager->getLogUiCmd().logUiCmdLine(userID, strToLog.str());
 
     if (!isUndoChange && line._undoChange != 0)
     {
@@ -3939,7 +3934,7 @@ void LogUiCommands::logSaveLoad(std::string cmd, const std::string & path, std::
     uiLogLine._timeStart = timeStart;
     uiLogLine._timeEnd = std::chrono::steady_clock::now();
     uiLogLine._repeat = 1;
-    uiLogLine._cmd = cmd;
+    uiLogLine._cmd = std::move(cmd);
 
     std::size_t size = 0;
     const auto st = FileUtil::Stat(path);

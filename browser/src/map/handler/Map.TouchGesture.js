@@ -8,7 +8,7 @@ L.Map.mergeOptions({
 	touchGesture: true,
 });
 
-/* global Hammer app $ GraphicSelection */
+/* global Hammer app $ GraphicSelection TileManager */
 L.Map.TouchGesture = L.Handler.extend({
 	statics: {
 		MAP: 1,
@@ -268,7 +268,7 @@ L.Map.TouchGesture = L.Handler.extend({
 		var textSelection;
 		if (docLayer._selectionHandles.start.rectangle && docLayer._selectionHandles.end.rectangle) {
 			// Oversimplication. See "inBand" function.
-			textSelection = new app.definitions.simpleRectangle(0, docLayer._selectionHandles.end.rectangle.y1, app.file.size.twips[0], 0);
+			textSelection = new app.definitions.simpleRectangle(0, docLayer._selectionHandles.end.rectangle.y1, app.file.size.x, 0);
 			textSelection.height = docLayer._selectionHandles.end.rectangle.y2 - docLayer._selectionHandles.start.rectangle.y1;
 		}
 
@@ -701,8 +701,8 @@ L.Map.TouchGesture = L.Handler.extend({
 			this._map.dragging._draggable._onMove(e);
 
 			// Prefetch border tiles for the current visible area after cancelling any scheduled calls to the prefetcher.
-			this._map._docLayer._clearPreFetch();
-			this._map._docLayer._preFetchTiles(true /* forceBorderCalc */);
+			TileManager.clearPreFetch();
+			TileManager.preFetchTiles(true /* forceBorderCalc */);
 
 			if (!horizontalEnd || !verticalEnd) {
 				this.autoscrollAnimReq = app.util.requestAnimFrame(this._autoscroll, this, true);

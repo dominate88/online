@@ -12,7 +12,7 @@
  * Impress tile layer is used to display a presentation document
  */
 
-/* global app $ L cool */
+/* global app $ L cool TileManager */
 
 L.ImpressTileLayer = L.CanvasTileLayer.extend({
 
@@ -44,7 +44,7 @@ L.ImpressTileLayer = L.CanvasTileLayer.extend({
 			app.file.partBasedView = true; // For Writer and Calc, this one should always be "true".
 
 		this._partHeightTwips = 0; // Single part's height.
-		this._partWidthTwips = 0; // Single part's width. These values are equal to _docWidthTwips & _docHeightTwips when app.file.partBasedView is true.
+		this._partWidthTwips = 0; // Single part's width. These values are equal to app.file.size.x & app.file.size.y when app.file.partBasedView is true.
 
 		app.events.on('contextchange', this._onContextChange.bind(this));
 	},
@@ -74,8 +74,8 @@ L.ImpressTileLayer = L.CanvasTileLayer.extend({
 
 		if (isDrawOrNotesPage) {
 			this._selectedMode = e.detail.context === 'NotesPage' ? 2 : 0;
-			this._refreshTilesInBackground();
-			this._update();
+			TileManager.refreshTilesInBackground();
+			TileManager.update();
 		}
 	},
 
@@ -109,9 +109,8 @@ L.ImpressTileLayer = L.CanvasTileLayer.extend({
 	},
 
 	newAnnotation: function (commentData) {
-		var ratio = this._tileWidthTwips / this._tileSize;
-		var docTopLeft = app.sectionContainer.getDocumentTopLeft();
-		docTopLeft = [docTopLeft[0] * ratio, docTopLeft[1] * ratio];
+		let docTopLeft = app.sectionContainer.getDocumentTopLeft();
+		docTopLeft = [docTopLeft[0] * app.pixelsToTwips, docTopLeft[1] * app.pixelsToTwips];
 		commentData.anchorPos = [docTopLeft[0], docTopLeft[1]];
 		commentData.rectangle = [docTopLeft[0], docTopLeft[1], 566, 566];
 
@@ -206,68 +205,6 @@ L.ImpressTileLayer = L.CanvasTileLayer.extend({
 		}
 	},
 
-	// TODO: share code with WriterTileLayer
-	/* jscpd:ignore-start */
-	_onInvalidateTilesMsg: function (textMsg) {
-		var command = app.socket.parseServerCmd(textMsg);
-		if (command.x === undefined || command.y === undefined || command.part === undefined) {
-			var strTwips = textMsg.match(/\d+/g);
-			command.x = parseInt(strTwips[0]);
-			command.y = parseInt(strTwips[1]);
-			command.width = parseInt(strTwips[2]);
-			command.height = parseInt(strTwips[3]);
-			command.part = this._selectedPart;
-		}
-
-		if (isNaN(command.mode))
-			command.mode = this._selectedMode;
-
-		var topLeftTwips = new L.Point(command.x, command.y);
-		var offset = new L.Point(command.width, command.height);
-		var bottomRightTwips = topLeftTwips.add(offset);
-		if (this._debug.tileInvalidationsOn && command.part === this._selectedPart) {
-			this._debug.addTileInvalidationRectangle(topLeftTwips, bottomRightTwips, textMsg);
-		}
-		var invalidBounds = new L.Bounds(topLeftTwips, bottomRightTwips);
-		var visibleTopLeft = this._latLngToTwips(this._map.getBounds().getNorthWest());
-		var visibleBottomRight = this._latLngToTwips(this._map.getBounds().getSouthEast());
-		var visibleArea = new L.Bounds(visibleTopLeft, visibleBottomRight);
-		var needsNewTiles = false;
-		for (var key in this._tiles) {
-			var coords = this._tiles[key].coords;
-			var bounds = this._coordsToTileBounds(coords);
-			if (coords.part === command.part && coords.mode === command.mode &&
-			    invalidBounds.intersects(bounds)) {
-				if (visibleArea.intersects(bounds)) {
-					needsNewTiles = true;
-				}
-				this._invalidateTile(key, command.wireId);
-			}
-		}
-
-		if (needsNewTiles && command.part === this._selectedPart && this._debug.tileInvalidationsOn) {
-			this._debug.addTileInvalidationMessage(textMsg);
-		}
-
-		if (command.part === this._selectedPart &&
-			command.mode === this._selectedMode &&
-			command.part !== this._lastValidPart) {
-			this._map.fire('updatepart', {part: this._lastValidPart, docType: this._docType});
-			this._lastValidPart = command.part;
-			this._map.fire('updatepart', {part: command.part, docType: this._docType});
-		}
-
-		var preview = this._map._docPreviews ? this._map._docPreviews[command.part] : null;
-		if (preview) {
-			preview.invalid = true;
-		}
-		this._previewInvalidations.push(invalidBounds);
-		// 1s after the last invalidation, update the preview
-		clearTimeout(this._previewInvalidator);
-		this._previewInvalidator = setTimeout(L.bind(this._invalidatePreviews, this), this.options.previewInvalidationTimeout);
-	},
-	/* jscpd:ignore-end */
-
 	_onSetPartMsg: function (textMsg) {
 		var part = parseInt(textMsg.match(/\d+/g)[0]);
 		if (part !== this._selectedPart) {
@@ -284,25 +221,23 @@ L.ImpressTileLayer = L.CanvasTileLayer.extend({
 		textMsg = textMsg.replace('status: ', '');
 		textMsg = textMsg.replace('statusupdate: ', '');
 		if (statusJSON.width && statusJSON.height && this._documentInfo !== textMsg) {
-			this._docWidthTwips = statusJSON.width;
-			this._docHeightTwips = statusJSON.height;
+			app.file.size.x = statusJSON.width;
+			app.file.size.y = statusJSON.height;
 			this._docType = statusJSON.type;
 			if (this._docType === 'drawing') {
 				L.DomUtil.addClass(L.DomUtil.get('presentation-controls-wrapper'), 'drawing');
 			}
 			this._parts = statusJSON.partscount;
-			this._partHeightTwips = this._docHeightTwips;
-			this._partWidthTwips = this._docWidthTwips;
+			this._partHeightTwips = app.file.size.y;
+			this._partWidthTwips = app.file.size.x;
 
 			if (app.file.fileBasedView) {
-				var totalHeight = this._parts * this._docHeightTwips; // Total height in twips.
+				var totalHeight = this._parts * app.file.size.y; // Total height in twips.
 				totalHeight += (this._parts) * this._spaceBetweenParts; // Space between parts.
-				this._docHeightTwips = totalHeight;
+				app.file.size.y = totalHeight;
 			}
 
-			app.file.size.twips = [this._docWidthTwips, this._docHeightTwips];
-			app.file.size.pixels = [Math.round(this._tileSize * (this._docWidthTwips / this._tileWidthTwips)), Math.round(this._tileSize * (this._docHeightTwips / this._tileHeightTwips))];
-			app.view.size.pixels = app.file.size.pixels.slice();
+			app.view.size = app.file.size.clone();
 
 			app.impress.partList = Object.assign([], statusJSON.parts);
 
@@ -329,7 +264,7 @@ L.ImpressTileLayer = L.CanvasTileLayer.extend({
 			else if (statusJSON.parts.length > 0 && statusJSON.parts[0].gridVisible === true)
 				app.map.stateChangeHandler.setItemValue('.uno:GridVisible', 'true');
 
-			this._resetPreFetching(true);
+			TileManager.resetPreFetching(true);
 
 			var refreshAnnotation = this._documentInfo !== textMsg;
 
@@ -342,7 +277,7 @@ L.ImpressTileLayer = L.CanvasTileLayer.extend({
 		}
 
 		if (app.file.fileBasedView)
-			this._updateFileBasedView();
+			TileManager.updateFileBasedView();
 	},
 
 	_invalidateAllPreviews: function () {

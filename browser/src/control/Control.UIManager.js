@@ -77,6 +77,10 @@ L.Control.UIManager = L.Control.extend({
 	// UI initialization
 
 	getCurrentMode: function() {
+		// no notebookbar on mobile
+		if (window.mode.isMobile())
+			return 'classic';
+
 		return this.shouldUseNotebookbarMode() ? 'notebookbar' : 'classic';
 	},
 
@@ -290,8 +294,10 @@ L.Control.UIManager = L.Control.extend({
 		this.documentNameInput = L.control.documentNameInput();
 		this.map.addControl(this.documentNameInput);
 		this.map.addControl(L.control.alertDialog());
-		this.mobileWizard = L.control.mobileWizard();
-		this.map.addControl(this.mobileWizard);
+		if (window.mode.isMobile()) {
+			this.mobileWizard = L.control.mobileWizard();
+			this.map.addControl(this.mobileWizard);
+		}
 		this.map.addControl(L.control.languageDialog());
 		this.map.dialog = L.control.lokDialog();
 		this.map.addControl(this.map.dialog);
@@ -472,6 +478,10 @@ L.Control.UIManager = L.Control.extend({
 				app.socket.sendMessage('uno .uno:SidebarShow');
 				app.socket.sendMessage('uno .uno:Navigator');
 				this.map.sidebar.setupTargetDeck('.uno:Navigator');
+			} else if (this.getBooleanDocTypePref('StyleListDeck', false)) {
+				app.socket.sendMessage('uno .uno:SidebarShow');
+				app.socket.sendMessage('uno .uno:SidebarDeck.StyleListDeck');
+				this.map.sidebar.setupTargetDeck('.uno:SidebarDeck.StyleListDeck');
 			}
 
 			if (!showSidebar)
@@ -711,8 +721,13 @@ L.Control.UIManager = L.Control.extend({
 	setCssRulesForCustomButtons: function() {
 		for (var button of this.customButtons) {
 			const item = document.querySelector(".w2ui-icon." + encodeURIComponent(button.id));
+			var imgUrl = button.imgurl;
 			if (item) {
-				item.style.background = 'url("' + encodeURI(button.imgurl) + '")';
+				if(button.imgurl === undefined || button.imgurl === "") {
+					var iconName = app.LOUtil.getIconNameOfCommand(button.unoCommand);
+					imgUrl = app.LOUtil.getImageURL(iconName);
+				}
+				item.style.background = 'url("' + encodeURI(imgUrl) + '")';
 				item.style.backgroundRepeat = 'no-repeat';
 				item.style.backgroundPosition = 'center';
 			}
@@ -1747,6 +1762,16 @@ L.Control.UIManager = L.Control.extend({
 	setDocTypePref: function(name, value) {
 		const docType = this.map.getDocType();
 		return window.prefs.set(`${docType}.${name}`, value);
+	},
+
+	setDocTypeMultiplePrefs: function (prefs) {
+		const docType = this.map.getDocType();
+
+		const deckPrefs = {};
+		for (const [key, value] of Object.entries(prefs)) {
+			deckPrefs[`${docType}.${key}`] = value
+		}
+		window.prefs.setMultiple(deckPrefs);
 	},
 
 	getBooleanDocTypePref: function(name, defaultValue = false) {

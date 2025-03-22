@@ -127,7 +127,7 @@ m4_ifelse(MOBILEAPP,[true],
         </div>
         <div id="closebuttonwrapperseparator"></div>
         <div id="closebuttonwrapper">
-          <div class="closebuttonimage" id="closebutton"></div>
+          <button class="closebuttonimage" id="closebutton" accesskey="ZC"></button>
         </div>
       </nav>
 
@@ -256,7 +256,7 @@ m4_ifelse(MOBILEAPP, [true],
       data-enable-accessibility = "%ENABLE_ACCESSIBILITY%"
       data-out-of-focus-timeout-secs = "%OUT_OF_FOCUS_TIMEOUT_SECS%"
       data-idle-timeout-secs = "%IDLE_TIMEOUT_SECS%"
-      data-min-saved-message-timeout-secs = %MIN_SAVED_MESSAGE_TIMEOUT_SECS%;
+      data-min-saved-message-timeout-secs = "%MIN_SAVED_MESSAGE_TIMEOUT_SECS%";
       data-protocol-debug = "%PROTOCOL_DEBUG%"
       data-enable-debug = "%ENABLE_DEBUG%"
       data-frame-ancestors = "%FRAME_ANCESTORS%"

@@ -49,6 +49,10 @@ QUIET_ECHO = $(QUIET_ECHO_$(V))
 QUIET_ECHO_ = $(QUIET_ECHO_$(AM_DEFAULT_VERBOSITY))
 QUIET_ECHO_0 = @echo "  ECHO    " $@;
 
+QUIET_CMP = $(QUIET_CMP_$(V))
+QUIET_CMP_ = $(QUIET_CMP_$(AM_DEFAULT_VERBOSITY))
+QUIET_CMP_0 = @echo "  CMP     " $@;
+
 MOCHA_DIR = $(srcdir)/mocha_tests
 MOCHA_JS_DIR = $(MOCHA_DIR)/workdir
 MOCHA_TS_FILES = $(wildcard $(MOCHA_DIR)/*.ts)
@@ -56,7 +60,7 @@ MOCHA_TS_JS_FILES = $(patsubst $(MOCHA_DIR)/%.ts,$(MOCHA_JS_DIR)/%.js,$(MOCHA_TS
 # tsc can report a failure, but still create a .js and a second make attempt will succeed,
 # so if this returns an error then delete the target
 $(MOCHA_JS_DIR)/%.js: $(MOCHA_DIR)/%.ts
-	$(QUIET_TSC) $(builddir)/node_modules/typescript/bin/tsc $< --outfile $@ --module none --lib dom,es2016 --target ES5 || (rm -f $@ && false)
+	$(QUIET_TSC) $(builddir)/node_modules/typescript/bin/tsc $< --outfile $@ --module none --lib dom,es2016 --target ES5 --downlevelIteration || (rm -f $@ && false)
 
 JQUERY_LIGHTNESS_IMAGE_PATH = $(srcdir)/images/jquery-ui-lightness
 JQUERY_LIGHTNESS_IMAGES = $(wildcard $(JQUERY_LIGHTNESS_IMAGE_PATH)/*.png)
@@ -117,6 +121,7 @@ endef
 
 COOL_ADMIN_TS = \
 	admin/src/ModalDialogCreator.ts \
+	admin/src/integrator/WordBook.ts \
 	admin/src/integrator/AdminIntegratorSettings.ts
 
 COOL_ADMIN_TS_JS = $(patsubst %.ts,$(TYPESCRIPT_JS_DIR)/%.js,$(COOL_ADMIN_TS))
@@ -136,7 +141,7 @@ COOL_ADMIN_JS =\
 
 NODE_MODULES_SRC =\
 	autolinker@3.14.1 \
-	dompurify@3.1.7 \
+	dompurify@3.2.4 \
 	json-js@1.1.2 \
 	select2@4.0.13 \
 	l10n-for-node@0.0.1 \
@@ -233,8 +238,13 @@ COOL_JS_LST =\
 	src/docstatefunctions.js \
 	src/docdispatcher.ts \
 	src/app/DocEvents.ts \
+	src/core/geometry.ts \
 	src/app/GraphicSelectionMiddleware.ts \
+	src/app/MultiPageViewLayout.ts \
+	src/app/TilesMiddleware.ts \
 	src/app/SearchService.ts \
+	src/app/BaseClass.ts \
+	src/app/Events.ts \
 	src/app/Rectangle.ts \
 	src/app/Util.ts \
 	src/app/LOUtil.ts \
@@ -244,7 +254,6 @@ COOL_JS_LST =\
 	src/UNO/Key.js \
 	src/core/Log.js \
 	src/core/Util.js \
-	src/core/geometry.ts \
 	src/core/Class.js \
 	src/core/Events.js \
 	src/core/Socket.js \
@@ -781,7 +790,7 @@ $(DIST_FOLDER)/global.js: $(srcdir)/js/global.js
 
 $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist: $(COOL_JS_DST)
 	$(QUIET_ECHO) echo $(COOL_JS_DST) > $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist.tmp
-	if cmp -s $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist.tmp $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist; then rm $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist.tmp; else mv $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist.tmp $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist; fi
+	$(QUIET_CMP) if cmp -s $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist.tmp $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist; then rm $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist.tmp; else mv $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist.tmp $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist; fi
 
 $(INTERMEDIATE_DIR)/COOL_JS.m4: $(INTERMEDIATE_DIR)/COOL_JS.m4.jslist
 	$(foreach file,$(NODE_MODULES_JS) $(COOL_LIBS_JS) $(patsubst %.ts,%.js,$(COOL_JS_WEBORDER)), $(shell echo -n $(file), >> $(INTERMEDIATE_DIR)/COOL_JS.m4.tmp))

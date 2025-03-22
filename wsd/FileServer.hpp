@@ -141,6 +141,10 @@ private:
                                         Poco::MemoryInputStream& message,
                                         const std::shared_ptr<StreamSocket>& socket);
 
+    static void fetchWordbook(const Poco::Net::HTTPRequest& request,
+                                   Poco::MemoryInputStream& message,
+                                   const std::shared_ptr<StreamSocket>& socket);
+
     static void deleteWopiSettingConfigs(const Poco::Net::HTTPRequest& request,
                                          Poco::MemoryInputStream& message,
                                          const std::shared_ptr<StreamSocket>& socket);
@@ -181,7 +185,7 @@ public:
     static bool authenticateAdmin(const Poco::Net::HTTPBasicCredentials& credentials,
                                   http::Response& response, std::string& jwtToken);
 
-    static void handleRequest(const Poco::Net::HTTPRequest& request,
+    static bool handleRequest(const Poco::Net::HTTPRequest& request,
                               const RequestDetails& requestDetails,
                               Poco::MemoryInputStream& message,
                               const std::shared_ptr<StreamSocket>& socket,
@@ -211,6 +215,8 @@ public:
         }
 #endif
     }
+
+    static void dumpState(std::ostream& os);
 
 private:
     static std::map<std::string, std::pair<std::string, std::string>> FileHash;

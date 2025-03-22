@@ -177,6 +177,7 @@ class StatusBar extends JSDialog.Toolbar {
 			statemsg = _UNO('.uno:ShowAnnotations') +': ' + _('On');
 		else if (state === 'false')
 			statemsg = _UNO('.uno:ShowAnnotations') +': ' + _('Off');
+		$('#showcomments-container').attr('default-state', state || null);
 		this.updateHtmlItem('ShowComments', state ? statemsg : ' ');
 	}
 
@@ -419,7 +420,7 @@ class StatusBar extends JSDialog.Toolbar {
 		if (permissionContainer) {
 			while (permissionContainer.firstChild)
 				permissionContainer.removeChild(permissionContainer.firstChild);
-			permissionContainer.appendChild(getPermissionModeElements(isReadOnlyMode, canUserWrite));
+			permissionContainer.appendChild(getPermissionModeElements(isReadOnlyMode, canUserWrite, this.map));
 		}
 
 		this.builder.updateWidget(this.parentContainer, {
@@ -463,10 +464,12 @@ class StatusBar extends JSDialog.Toolbar {
 			this.updateHtmlItem('RowColSelCount', state ? state : _('Select multiple cells'), !state);
 		}
 		else if (commandName === '.uno:InsertMode') {
-			this.updateHtmlItem('InsertMode', state ? L.Styles.insertMode[state].toLocaleString() : _('Insert mode: inactive'), !state);
+			this.updateHtmlItem('InsertMode', state ? L.Styles.insertMode[state].toLocaleString() : ' ', !state);
 
 			$('#InsertMode').removeClass();
 			$('#InsertMode').addClass('jsdialog ui-badge insert-mode-' + state);
+			var isDefaultState = state === 'true' || state === '';
+			$('#insertmode-container').attr('default-state', isDefaultState || null);
 
 			if ((state === 'false' || !state) && app.definitions.urlPopUpSection.isOpen()) {
 				this.map.hyperlinkUnderCursor = null;
@@ -474,6 +477,7 @@ class StatusBar extends JSDialog.Toolbar {
 			}
 		}
 		else if (commandName === '.uno:StatusSelectionMode' || commandName === '.uno:SelectionMode') {
+			$('#statusselectionmode-container').attr('default-state', state === '0' || null);
 			this.updateHtmlItem('StatusSelectionMode', state ? L.Styles.selectionMode[state].toLocaleString() : _('Selection mode: inactive'), !state);
 		}
 		else if (commandName == '.uno:StateTableCell') {
@@ -517,6 +521,7 @@ class StatusBar extends JSDialog.Toolbar {
 		}
 		else if (commandName === '.uno:EditDoc') {
 			state = state !== "false";
+			$('#permissionmode-container').attr('default-state', this.map.isEditMode() || null);
 			this.onPermissionChanged({detail : {
 				perm: state && this.map.isEditMode() ? "edit" : "readonly"
 			} });

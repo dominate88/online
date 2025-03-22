@@ -360,7 +360,8 @@ L.Map.include({
 		if ((command.startsWith('.uno:Sidebar') && !command.startsWith('.uno:SidebarShow')) ||
 			command.startsWith('.uno:SlideChangeWindow') || command.startsWith('.uno:CustomAnimation') ||
 			command.startsWith('.uno:MasterSlidesPanel') || command.startsWith('.uno:ModifyPage') ||
-			command.startsWith('.uno:Navigator') || command.startsWith('.uno:SidebarDeck')) {
+			command.startsWith('.uno:Navigator') || command.startsWith('.uno:SidebarDeck') ||
+			command.startsWith('.uno:EditStyle')) {
 
 			// sidebar control is present only in desktop/tablet case
 			if (this.sidebar) {
@@ -923,23 +924,6 @@ L.Map.include({
 		}
 
 		this._onGotFocus();
-	},
-
-	preventKeyboardPopup: function (id) {
-		// In the iOS app we don't want clicking on the toolbar to pop up the keyboard.
-		if (!window.ThisIsTheiOSApp && id !== 'zoomin' && id !== 'zoomout' && id !== 'mobile_wizard' && id !== 'insertion_mobile_wizard') {
-			this.focus(this.canAcceptKeyboardInput()); // Maintain same keyboard state.
-		}
-	},
-
-	// used in onClick method of w2ui toolbar
-	executeUnoAction: function (item) {
-		if (item.unosheet && this.getDocType() === 'spreadsheet') {
-			this.toggleCommandState(item.unosheet);
-		}
-		else {
-			this.toggleCommandState(window.getUNOCommand(item.uno));
-		}
 	},
 
 	openRevisionHistory: function () {

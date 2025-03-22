@@ -583,9 +583,6 @@ L.Clipboard = L.Class.extend({
 		if ($('.ui-textarea').is(':focus'))
 			return true;
 
-		if ($('.w2ui-input').is(':focus'))
-			return true;
-
 		if ($('input.ui-combobox-content').is(':focus'))
 			return true;
 
@@ -1267,7 +1264,18 @@ L.Clipboard = L.Class.extend({
 	_warnCopyPaste: function() {
 		var id = 'copy_paste_warning';
 		this._map.uiManager.showYesNoButton(id + '-box', '', '', _('OK'), null, null, null, true);
+		this._warnCopyPasteImpl(id);
+	},
+
+	_warnCopyPasteImpl: function (id) {
 		var box = document.getElementById(id + '-box');
+
+		// TODO: do it JSDialog native...
+		if (!box) {
+			setTimeout(() => { this._warnCopyPasteImpl(id) }, 10);
+			return;
+		}
+
 		var innerDiv = L.DomUtil.create('div', '', null);
 		box.insertBefore(innerDiv, box.firstChild);
 
@@ -1354,7 +1362,19 @@ L.Clipboard = L.Class.extend({
 		this._map.uiManager.showYesNoButton(id + '-box', /*title=*/'', /*message=*/'', /*yesButtonText=*/_('Paste from this document'), /*noButtonText=*/_('Cancel paste special'), /*yesFunction=*/function() {
 			app.socket.sendMessage('uno .uno:PasteSpecial');
 		}, /*noFunction=*/null, /*cancellable=*/true);
+
+		this._openPasteSpecialPopupImpl(id);
+	},
+
+	_openPasteSpecialPopupImpl: function (id) {
 		var box = document.getElementById(id + '-box');
+
+		// TODO: do it JSDialog native...
+		if (!box) {
+			setTimeout(() => { this._openPasteSpecialPopupImpl(id) }, 10);
+			return;
+		}
+
 		var innerDiv = L.DomUtil.create('div', '', null);
 		box.insertBefore(innerDiv, box.firstChild);
 

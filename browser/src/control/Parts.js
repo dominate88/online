@@ -13,7 +13,7 @@
  */
 
 /* global app _ cool */
-/* global _ JSDialog app OtherViewCellCursorSection */
+/* global _ JSDialog app OtherViewCellCursorSection TileManager */
 
 L.Map.include({
 	/*
@@ -38,7 +38,9 @@ L.Map.include({
 		} else if ((docType === 'presentation' || docType === 'drawing')) {
 			if (docLayer._prevSelectedPart !== undefined && part < app.impress.partList.length && app.impress.partList[docLayer._prevSelectedPart])
 				isTheSamePart = app.impress.partList[docLayer._prevSelectedPart].hash === app.impress.partList[part].hash;
-		} else if (docType !== 'text') {
+		} else if (docType === 'text') {
+			isTheSamePart = true;
+		} else {
 			console.error('Unknown docType: ' + docType);
 		}
 
@@ -114,8 +116,8 @@ L.Map.include({
 		app.definitions.otherViewGraphicSelectionSection.updateVisibilities();
 		docLayer.eachView(docLayer._viewSelections, docLayer._onUpdateTextViewSelection, docLayer);
 		docLayer._clearSelections(calledFromSetPartHandler);
-		docLayer._updateOnChangePart();
-		docLayer._pruneTiles();
+		TileManager.updateOnChangePart();
+		TileManager.pruneTiles();
 		docLayer._prevSelectedPartNeedsUpdate = true;
 		if (docLayer._invalidatePreviews) {
 			docLayer._invalidatePreviews();
@@ -223,8 +225,8 @@ L.Map.include({
 
 		if (docLayer._docType === 'text') return;
 
-		const tileWidth = docLayer._partWidthTwips ? docLayer._partWidthTwips: docLayer._docWidthTwips;
-		const tileHeight = docLayer._partHeightTwips ? docLayer._partHeightTwips: docLayer._docHeightTwips;
+		const tileWidth = docLayer._partWidthTwips ? docLayer._partWidthTwips: app.file.size.x;
+		const tileHeight = docLayer._partHeightTwips ? docLayer._partHeightTwips: app.file.size.y;
 
 		const docRatio = tileWidth / tileHeight;
 		const imgRatio = maxWidth / maxHeight;
@@ -455,26 +457,6 @@ L.Map.include({
 
 	showPage: function () {
 		if (this.getDocType() === 'spreadsheet' && app.calc.isAnyPartHidden()) {
-			var hiddenParts = app.calc.getHiddenPartNameArray();
-
-			if (app.calc.isAnyPartHidden()) {
-				var container = document.createElement('div');
-				container.style.maxHeight = '300px';
-				container.style.overflowY = 'auto';
-				for (var i = 0; i < hiddenParts.length; i++) {
-					var checkbox = document.createElement('input');
-					checkbox.type = 'checkbox';
-					checkbox.id = 'hidden-part-checkbox-' + hiddenParts[i];
-					var label = document.createElement('label');
-					label.htmlFor = 'hidden-part-checkbox-' + hiddenParts[i];
-					label.innerText = hiddenParts[i];
-					var newLine = document.createElement('br');
-					container.appendChild(checkbox);
-					container.appendChild(label);
-					container.appendChild(newLine);
-				}
-			}
-
 			const dialogId = 'show-sheets-modal';
 
 			const buttonCallback = function() {
@@ -489,24 +471,54 @@ L.Map.include({
 			};
 
 			this.uiManager.showInfoModal(dialogId, _('Show sheets'), ' ', ' ', _('OK'), buttonCallback, true, dialogId + '-response');
-			const modal = document.getElementById(dialogId);
-			modal.insertBefore(container, modal.children[0]);
-
-			JSDialog.enableButtonInModal(dialogId, dialogId + '-response', false);
-
-			var checkboxes = document.querySelectorAll('#show-sheets-modal input[type="checkbox"]');
-			checkboxes.forEach(function(checkbox) {
-				checkbox.addEventListener('change', function() {
-					var anyChecked = false;
-					checkboxes.forEach(function(checkbox) {
-						if (checkbox.checked) {
-							anyChecked = true;
-						}
-					});
-					JSDialog.enableButtonInModal(dialogId, dialogId + '-response', anyChecked);
-				});
-			});
+			this.showPageModalImpl(dialogId);
 		}
+	},
+
+	showPageModalImpl: function(dialogId) {
+		const modal = document.getElementById(dialogId);
+
+		if (!modal) {
+			setTimeout(() => { this.showPageModalImpl(dialogId) }, 10);
+			return;
+		}
+
+		var hiddenParts = app.calc.getHiddenPartNameArray();
+
+		if (app.calc.isAnyPartHidden()) {
+			var container = document.createElement('div');
+			container.style.maxHeight = '300px';
+			container.style.overflowY = 'auto';
+			for (var i = 0; i < hiddenParts.length; i++) {
+				var checkbox = document.createElement('input');
+				checkbox.type = 'checkbox';
+				checkbox.id = 'hidden-part-checkbox-' + hiddenParts[i];
+				var label = document.createElement('label');
+				label.htmlFor = 'hidden-part-checkbox-' + hiddenParts[i];
+				label.innerText = hiddenParts[i];
+				var newLine = document.createElement('br');
+				container.appendChild(checkbox);
+				container.appendChild(label);
+				container.appendChild(newLine);
+			}
+		}
+
+		modal.insertBefore(container, modal.children[0]);
+
+		JSDialog.enableButtonInModal(dialogId, dialogId + '-response', false);
+
+		var checkboxes = document.querySelectorAll('#show-sheets-modal input[type="checkbox"]');
+		checkboxes.forEach(function(checkbox) {
+			checkbox.addEventListener('change', function() {
+				var anyChecked = false;
+				checkboxes.forEach(function(checkbox) {
+					if (checkbox.checked) {
+						anyChecked = true;
+					}
+				});
+				JSDialog.enableButtonInModal(dialogId, dialogId + '-response', anyChecked);
+			});
+		});
 	},
 
 	hidePage: function (tabNumber) {

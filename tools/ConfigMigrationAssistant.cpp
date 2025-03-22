@@ -22,7 +22,6 @@
 #include <Poco/AutoPtr.h>
 
 using Poco::Util::XMLConfiguration;
-using Poco::Util::AbstractConfiguration;
 
 static const std::string NET_POST_ALLOW_HOST = ".net.post_allow.host";
 static const std::string STORAGE_WOPI_HOST = ".storage.wopi.host";
@@ -62,10 +61,11 @@ void MigrateLevel(const XMLConfiguration &sourceConfig, XMLConfiguration &target
     }
     if (subKeys.empty())
     {
-        const std::string sourceElement = sourceConfig.getString(sourceLevel);
+        std::string sourceElement = sourceConfig.getString(sourceLevel);
         // Need to handle keys pointing to multiple elements separately, refer to multiElems
-        const std::string commonKeyPart =
-                sourceLevel.find("[") != std::string::npos ? sourceLevel.substr(0, sourceLevel.find("[")) : sourceLevel;
+        const std::string commonKeyPart = sourceLevel.find('[') != std::string::npos
+                                              ? sourceLevel.substr(0, sourceLevel.find('['))
+                                              : sourceLevel;
         if (multiElems.find(commonKeyPart) != multiElems.end())
         {
             if (commonKeyPart == ".logging.file.property")
@@ -259,7 +259,8 @@ void PostProcess(XMLConfiguration &targetConfig)
     }
 }
 
-int MigrateConfig(std::string oldConfigFile, std::string newConfigFile, bool write) {
+int MigrateConfig(const std::string& oldConfigFile, const std::string& newConfigFile, bool write)
+{
     PreProcess();
     Poco::AutoPtr<XMLConfiguration> oldXMLConfig(new XMLConfiguration(oldConfigFile));
     Poco::AutoPtr<XMLConfiguration> newXMLConfig(new XMLConfiguration(newConfigFile));

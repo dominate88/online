@@ -2,11 +2,17 @@
 
 var helper = require('../../common/helper');
 var calcHelper = require('../../common/calc_helper');
+var desktopHelper = require('../../common/desktop_helper');
 
 describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Calc clipboard tests.', function() {
 
 	beforeEach(function() {
 		helper.setupAndLoadDocument('calc/clipboard.ods');
+
+		if (Cypress.env('INTEGRATION') === 'nextcloud') {
+			desktopHelper.showStatusBarIfHidden();
+		}
+		desktopHelper.shouldHaveZoomLevel('100');
 
 		cy.cGet('#map').focus();
 		calcHelper.clickOnFirstCell();
@@ -188,7 +194,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Calc clipboard tests.', fu
 		calcHelper.clickOnFirstCell();
 		helper.typeIntoDocument('Something to copy paste.');
 		helper.typeIntoDocument('{enter}');
-		calcHelper.clickOnFirstCell();
+		helper.typeIntoDocument('{upArrow}');
 
 		cy.cGet('#map').rightclick(15, 15, { force: true });
 		cy.cGet('.on-the-fly-context-menu').should('be.visible');
