@@ -360,7 +360,7 @@ StorageBase::LockUpdateResult WopiStorage::updateLockState(const Authorization& 
 
 void WopiStorage::updateLockStateAsync(const Authorization& auth, LockContext& lockCtx,
                                        LockState lock, const Attributes& attribs,
-                                       SocketPoll& socketPoll,
+                                       const std::shared_ptr<SocketPoll>& socketPoll,
                                        const AsyncLockStateCallback& asyncLockStateCallback)
 {
     auto profileZone = std::make_shared<ProfileZone>(
@@ -419,9 +419,9 @@ void WopiStorage::updateLockStateAsync(const Authorization& auth, LockContext& l
     httpHeader.setContentLength(0);
 
     http::Session::FinishedCallback finishedCallback =
-        [this, startTime, lock, wopiLog, uriAnonym, asyncLockStateCallback,
+        [this, startTime, lock, wopiLog, asyncLockStateCallback,
          profileZone =
-             std::move(profileZone)](const std::shared_ptr<http::Session>& httpSession) mutable
+             std::move(profileZone)](const std::shared_ptr<http::Session>& httpSession)
     {
         profileZone->end();
 
@@ -455,14 +455,18 @@ void WopiStorage::updateLockStateAsync(const Authorization& auth, LockContext& l
              httpResponse->statusLine().statusCode() == http::StatusCode::Forbidden ||
              httpResponse->statusLine().statusCode() == http::StatusCode::NotFound);
 
+        const StorageBase::LockUpdateResult::Status status =
+            unauthorized ? LockUpdateResult::Status::UNAUTHORIZED
+                         : LockUpdateResult::Status::FAILED;
+
         LOG_ERR("Un-successful " << wopiLog << " with " << (unauthorized ? "expired token, " : "")
                                  << "HTTP status " << httpResponse->statusLine().statusCode()
                                  << ", failure reason: [" << failureReason << "] and response: ["
                                  << responseString << ']');
 
-        return asyncLockStateCallback(AsyncLockUpdate(
-            AsyncLockUpdate::State::Error,
-            LockUpdateResult(LockUpdateResult::Status::UNAUTHORIZED, lock, std::move(failureReason))));
+        return asyncLockStateCallback(
+            AsyncLockUpdate(AsyncLockUpdate::State::Error,
+                            LockUpdateResult(status, lock, std::move(failureReason))));
     };
 
     _lockHttpSession->setFinishedHandler(std::move(finishedCallback));
@@ -668,7 +672,7 @@ std::string WopiStorage::downloadDocument(const Poco::URI& uriObject, const std:
 std::size_t WopiStorage::uploadLocalFileToStorageAsync(
     const Authorization& auth, LockContext& lockCtx, const std::string& saveAsPath,
     const std::string& saveAsFilename, const bool isRename, const Attributes& attribs,
-    SocketPoll& socketPoll, const AsyncUploadCallback& asyncUploadCallback)
+    const std::shared_ptr<SocketPoll>& socketPoll, const AsyncUploadCallback& asyncUploadCallback)
 {
     auto profileZone =
         std::make_shared<ProfileZone>(std::string("WopiStorage::uploadLocalFileToStorage"),
@@ -795,8 +799,11 @@ std::size_t WopiStorage::uploadLocalFileToStorageAsync(
         httpRequest.setBodyFile(filePath);
 
         http::Session::FinishedCallback finishedCallback =
-            [this, startTime, wopiLog, filePathAnonym, uriAnonym, size, isSaveAs, isRename,
-             asyncUploadCallback, profileZone = std::move(profileZone)](
+            [this, startTime, wopiLog,
+             filePathAnonym = std::move(filePathAnonym),
+             uriAnonym = std::move(uriAnonym),
+             size, isSaveAs, isRename, asyncUploadCallback,
+             profileZone = std::move(profileZone)](
                 const std::shared_ptr<http::Session>& httpSession)
         {
             profileZone->end();
@@ -824,7 +831,7 @@ std::size_t WopiStorage::uploadLocalFileToStorageAsync(
                 handleUploadToStorageResponse(details, httpResponse->getBody());
 
             // Fire the callback to our client (DocBroker, typically).
-            asyncUploadCallback(AsyncUpload(AsyncUpload::State::Complete, res));
+            asyncUploadCallback(AsyncUpload(AsyncUpload::State::Complete, std::move(res)));
         };
 
         _uploadHttpSession->setFinishedHandler(std::move(finishedCallback));
@@ -833,10 +840,9 @@ std::size_t WopiStorage::uploadLocalFileToStorageAsync(
 
         _uploadHttpSession->setConnectFailHandler(
             [asyncUploadCallback,
-             uriObject](const std::shared_ptr<http::Session>& /* httpSession */)
+             uri=uriObject.toString()](const std::shared_ptr<http::Session>& /* httpSession */)
             {
-                LOG_ERR("Cannot connect to [" << uriObject.toString()
-                                              << "] for uploading to wopi storage");
+                LOG_ERR("Cannot connect to [" << uri << "] for uploading to wopi storage");
                 asyncUploadCallback(
                     AsyncUpload(AsyncUpload::State::Error,
                                 UploadResult(UploadResult::Result::FAILED, "Connection failed.")));

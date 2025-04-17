@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -20,7 +21,7 @@ type ToolbarItem = any;
 class Toolbar {
 	protected map: any;
 	protected docType: string;
-	protected builder: any;
+	protected builder: JSBuilder;
 	protected callback: JSDialogCallback;
 	protected toolbarElementId: string;
 	protected parentContainer: Element;
@@ -62,7 +63,7 @@ class Toolbar {
 		this.reset();
 
 		var items = this.getToolItems();
-		this.builder.build(this.parentContainer, items);
+		this.builder.build(this.parentContainer, items, undefined);
 
 		JSDialog.MakeScrollable(
 			this.parentContainer,

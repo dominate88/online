@@ -114,8 +114,7 @@ std::pair<std::shared_ptr<DocumentBroker>, std::string>
 findOrCreateDocBroker(DocumentBroker::ChildType type, const std::string& uri,
                       const std::string& docKey, const std::string& configId,
                       const std::string& id, const Poco::URI& uriPublic,
-                      unsigned mobileAppDocId,
-                      std::unique_ptr<WopiStorage::WOPIFileInfo> wopiFileInfo)
+                      unsigned mobileAppDocId)
 {
     LOG_INF("Find or create DocBroker for docKey ["
             << docKey << "] for session [" << id << "] on url ["
@@ -189,8 +188,7 @@ findOrCreateDocBroker(DocumentBroker::ChildType type, const std::string& uri,
         // Set the one we just created.
         LOG_DBG("New DocumentBroker for docKey [" << docKey << ']');
         docBroker = std::make_shared<DocumentBroker>(type, uri, uriPublic, docKey,
-                                                     configId, mobileAppDocId,
-                                                     std::move(wopiFileInfo));
+                                                     configId, mobileAppDocId);
         DocBrokers.emplace(docKey, docBroker);
         LOG_TRC("Have " << DocBrokers.size() << " DocBrokers after inserting [" << docKey << ']');
     }
@@ -615,6 +613,9 @@ void ClientRequestDispatcher::onConnect(const std::shared_ptr<StreamSocket>& soc
     LOG_TRC("Connected to ClientRequestDispatcher");
 }
 
+/// Starts an asynchronous CheckFileInfo request in parallel to serving
+/// static files. At this point, we don't have the client's WebSocket
+/// yet, and we're proactively trying to authenticate the client.
 void launchAsyncCheckFileInfo(
     const std::string& id, const FileServerRequestHandler::ResourceAccessDetails& accessDetails,
     std::unordered_map<std::string, std::shared_ptr<RequestVettingStation>>& requestVettingStations,
@@ -622,6 +623,8 @@ void launchAsyncCheckFileInfo(
 {
     const std::string requestKey = RequestDetails::getRequestKey(
         accessDetails.wopiSrc(), accessDetails.accessToken());
+    LOG_DBG("RequestKey: [" << requestKey << "], wopiSrc: [" << accessDetails.wopiSrc()
+                            << "], accessToken: [" << accessDetails.accessToken() << ']');
 
     std::vector<std::string> options = {
         "access_token=" + accessDetails.accessToken(), "access_token_ttl=0"
@@ -656,6 +659,7 @@ void launchAsyncCheckFileInfo(
             requestKey, std::make_shared<RequestVettingStation>(
                             COOLWSD::getWebServerPoll(), fullRequestDetails));
 
+        // Start async CheckFileInfo, ahead of getting the client WS.
         it.first->second->handleRequest(id);
     }
 }
@@ -683,7 +687,7 @@ void ClientRequestDispatcher::handleIncomingMessage(SocketDisposition& dispositi
 #if 0 // debug a specific command's payload
         if (Util::findInVector(socket->getInBuffer(), "insertfile") != std::string::npos)
         {
-            std::ostringstream oss;
+            std::ostringstream oss(Util::makeDumpStateStream());
             oss << "Debug - specific command:\n";
             socket->dumpState(oss);
             LOG_INF(oss.str());
@@ -733,12 +737,15 @@ void ClientRequestDispatcher::handleIncomingMessage(SocketDisposition& dispositi
         bool handledByUnitTesting = false;
         if (isUnitTesting)
         {
+            LOG_DBG("Unit-Test: handleHttpRequest: " << request.getURI());
             handledByUnitTesting = UnitWSD::get().handleHttpRequest(request, message, socket);
             if (!handledByUnitTesting)
             {
+                LOG_DBG("Unit-Test: parallelizeCheckInfo" << request.getURI());
                 auto mapAccessDetails = UnitWSD::get().parallelizeCheckInfo(request, message, socket);
                 if (!mapAccessDetails.empty())
                 {
+                    LOG_DBG("Unit-Test: launchAsyncCheckFileInfo" << request.getURI());
                     auto accessDetails = FileServerRequestHandler::ResourceAccessDetails(
                         mapAccessDetails.at("wopiSrc"),
                         mapAccessDetails.at("accessToken"),
@@ -749,6 +756,7 @@ void ClientRequestDispatcher::handleIncomingMessage(SocketDisposition& dispositi
                 }
             }
         }
+
         if (handledByUnitTesting)
         {
             // Unit testing, nothing to do here
@@ -811,14 +819,12 @@ void ClientRequestDispatcher::handleIncomingMessage(SocketDisposition& dispositi
         {
             // Admin connections
             LOG_INF("Admin request: " << request.getURI());
-            if (AdminSocketHandler::handleInitialRequest(_socket, request))
+            const ServerURL cnxDetails(requestDetails);
+            if (AdminSocketHandler::handleInitialRequest(_socket, request, cnxDetails.getWebServerUrl()))
             {
-                disposition.setMove(
-                    [](const std::shared_ptr<Socket>& moveSocket)
-                    {
-                        // Hand the socket over to the Admin poll.
-                        Admin::instance().insertNewSocket(moveSocket);
-                    });
+                // Hand the socket over to the Admin poll.
+                disposition.setTransfer(Admin::instance(),
+                                        [](const std::shared_ptr<Socket>& /*moveSocket*/) {});
             }
             else
                 HttpHelper::sendErrorAndShutdown(http::StatusCode::BadRequest, socket);
@@ -896,7 +902,7 @@ void ClientRequestDispatcher::handleIncomingMessage(SocketDisposition& dispositi
         else if (requestDetails.equals(RequestDetails::Field::Type, "cool") &&
                  requestDetails.equals(1, "clipboard"))
         {
-            //              Util::dumpHex(std::cerr, socket->getInBuffer(), "clipboard:\n"); // lots of data ...
+            //              HexUtil::dumpHex(std::cerr, socket->getInBuffer(), "clipboard:\n"); // lots of data ...
             servedSync = handleClipboardRequest(request, message, disposition, socket);
         }
         else if (requestDetails.equals(RequestDetails::Field::Type, "cool") &&
@@ -1040,13 +1046,12 @@ bool ClientRequestDispatcher::handleRootRequest(const RequestDetails& requestDet
     assert(socket && "Must have a valid socket");
 
     LOG_DBG("HTTP request: " << requestDetails.getURI());
-    const std::string mimeType = "text/plain";
     const std::string responseString = "OK";
 
     http::Response httpResponse(http::StatusCode::OK);
     FileServerRequestHandler::hstsHeaders(httpResponse);
     httpResponse.set("Content-Length", std::to_string(responseString.size()));
-    httpResponse.set("Content-Type", mimeType);
+    httpResponse.set("Content-Type", "text/plain");
     httpResponse.set("Last-Modified", Util::getHttpTimeNow());
     if( requestDetails.closeConnection() )
         httpResponse.header().setConnectionToken(http::Header::ConnectionToken::Close);
@@ -1131,6 +1136,20 @@ STATE_ENUM(CheckStatus,
     Timeout,
 );
 
+void ClientRequestDispatcher::sendResult(const std::shared_ptr<StreamSocket>& socket, CheckStatus result)
+{
+    std::string output = "{\"status\": \"" + JsonUtil::escapeJSONValue(nameShort(result)) + "\"}\n";
+
+    http::Response jsonResponse(http::StatusCode::OK);
+    FileServerRequestHandler::hstsHeaders(jsonResponse);
+    jsonResponse.set("Last-Modified", Util::getHttpTimeNow());
+    jsonResponse.setBody(std::move(output), "application/json");
+    jsonResponse.set("X-Content-Type-Options", "nosniff");
+
+    socket->sendAndShutdown(jsonResponse);
+    LOG_INF("Wopi Access Check request, result: " << nameShort(result));
+}
+
 bool ClientRequestDispatcher::handleWopiAccessCheckRequest(const Poco::Net::HTTPRequest& request,
                                                            Poco::MemoryInputStream& message,
                                                            const std::shared_ptr<StreamSocket>& socket)
@@ -1212,23 +1231,9 @@ bool ClientRequestDispatcher::handleWopiAccessCheckRequest(const Poco::Net::HTTP
 
     LOG_TRC("Wopi Access Check request scheme: " << scheme << " " << port);
 
-    const auto sendResult = [this, socket](CheckStatus result)
-    {
-        const auto output = "{\"status\": \"" + JsonUtil::escapeJSONValue(nameShort(result)) + "\"}\n";
-
-        http::Response jsonResponse(http::StatusCode::OK);
-        FileServerRequestHandler::hstsHeaders(jsonResponse);
-        jsonResponse.set("Last-Modified", Util::getHttpTimeNow());
-        jsonResponse.setBody(output, "application/json");
-        jsonResponse.set("X-Content-Type-Options", "nosniff");
-
-        socket->sendAndShutdown(jsonResponse);
-        LOG_INF("Wopi Access Check request, result: " << nameShort(result));
-    };
-
     if (scheme.empty())
     {
-        sendResult(CheckStatus::NoScheme);
+        sendResult(socket, CheckStatus::NoScheme);
         return true;
     }
     // if the wopi hosts uses https, so must cool or it will have Mixed Content errors
@@ -1240,7 +1245,7 @@ bool ClientRequestDispatcher::handleWopiAccessCheckRequest(const Poco::Net::HTTP
 #endif
     )
     {
-        sendResult(CheckStatus::NotHttps);
+        sendResult(socket, CheckStatus::NotHttps);
         return true;
     }
 
@@ -1262,7 +1267,7 @@ bool ClientRequestDispatcher::handleWopiAccessCheckRequest(const Poco::Net::HTTP
     if (!wopiHostAllowed)
     {
         LOG_TRC("Wopi Access Check, wopi host not allowed " << host);
-        sendResult(CheckStatus::WopiHostNotAllowed);
+        sendResult(socket, CheckStatus::WopiHostNotAllowed);
         return true;
     }
 
@@ -1270,8 +1275,10 @@ bool ClientRequestDispatcher::handleWopiAccessCheckRequest(const Poco::Net::HTTP
     auto httpProbeSession = http::Session::create(std::move(host), protocol, port);
     httpProbeSession->setTimeout(std::chrono::seconds(2));
 
+    std::weak_ptr<StreamSocket> socketWeak(socket);
+
     httpProbeSession->setConnectFailHandler(
-        [=, this] (const std::shared_ptr<http::Session>& probeSession){
+        [socketWeak, this] (const std::shared_ptr<http::Session>& probeSession){
 
             CheckStatus status = CheckStatus::UnspecifiedError;
 
@@ -1299,12 +1306,20 @@ bool ClientRequestDispatcher::handleWopiAccessCheckRequest(const Poco::Net::HTTP
                     LOG_DBG("Result ssl: " << probeSession->getSslVerifyMessage());
                 }
             }
+#else
+            (void) this; // to make the compiler happy wrt. the lambda capture
 #endif
 
-            sendResult(status);
+            std::shared_ptr<StreamSocket> destSocket = socketWeak.lock();
+            if (!destSocket)
+            {
+                LOG_ERR("Invalid socket while sending wopi access check result");
+                return;
+            }
+            sendResult(destSocket, status);
     });
 
-    auto finishHandler = [=, this](const std::shared_ptr<http::Session>& probeSession)
+    auto finishHandler = [socketWeak, this](const std::shared_ptr<http::Session>& probeSession)
     {
         LOG_TRC("finishHandler ");
 
@@ -1351,11 +1366,17 @@ bool ClientRequestDispatcher::handleWopiAccessCheckRequest(const Poco::Net::HTTP
         }
 #endif
 
-        sendResult(status);
+        std::shared_ptr<StreamSocket> destSocket = socketWeak.lock();
+        if (!destSocket)
+        {
+            LOG_ERR("Invalid socket while sending wopi access check result");
+            return;
+        }
+        sendResult(destSocket, status);
     };
 
     httpProbeSession->setFinishedHandler(std::move(finishHandler));
-    httpProbeSession->asyncRequest(httpRequest, *COOLWSD::getWebServerPoll());
+    httpProbeSession->asyncRequest(httpRequest, COOLWSD::getWebServerPoll());
 
     return true;
 }
@@ -2139,7 +2160,7 @@ bool ClientRequestDispatcher::handleClientProxyRequest(const Poco::Net::HTTPRequ
     // Request a kit process for this doc.
     std::pair<std::shared_ptr<DocumentBroker>, std::string> pair
         = findOrCreateDocBroker(DocumentBroker::ChildType::Interactive, url, docKey, /*TODO*/ "",
-                              _id, uriPublic, /*mobileAppDocId=*/0, /*wopiFileInfo=*/nullptr);
+                              _id, uriPublic, /*mobileAppDocId=*/0);
     auto docBroker = pair.first;
 
     if (!docBroker)
@@ -2209,7 +2230,8 @@ bool ClientRequestDispatcher::handleClientWsUpgrade(const Poco::Net::HTTPRequest
                                   << socket->getFD());
 
     // First Upgrade.
-    auto ws = std::make_shared<WebSocketHandler>(socket, request);
+    const ServerURL cnxDetails(requestDetails);
+    auto ws = std::make_shared<WebSocketHandler>(socket, request, cnxDetails.getWebServerUrl());
 
     // Response to clients beyond this point is done via WebSocket.
     try
@@ -2251,6 +2273,8 @@ bool ClientRequestDispatcher::handleClientWsUpgrade(const Poco::Net::HTTPRequest
         LOG_TRC("Sending to Client [" << status << ']');
         ws->sendMessage(status);
 
+        // We have the client's WS and we either got the proactive CheckFileInfo
+        // results, which we can use, or we need to issue a new async CheckFileInfo.
         _rvs->handleRequest(_id, requestDetails, ws, socket, mobileAppDocId, disposition);
         return false; // async keep alive
     }
@@ -2474,8 +2498,15 @@ static std::string getCapabilitiesJson(bool convertToAvailable)
 
 /// Send the /hosting/capabilities JSON to socket
 static void sendCapabilities(bool convertToAvailable, bool closeConnection,
-                             const std::shared_ptr<StreamSocket>& socket)
+                             const std::weak_ptr<StreamSocket>& socketWeak)
 {
+    std::shared_ptr<StreamSocket> socket = socketWeak.lock();
+    if (!socket)
+    {
+        LOG_ERR("Invalid socket while sending capabilities");
+        return;
+    }
+
     http::Response httpResponse(http::StatusCode::OK);
     FileServerRequestHandler::hstsHeaders(httpResponse);
     httpResponse.set("Last-Modified", Util::getHttpTimeNow());
@@ -2495,10 +2526,13 @@ bool ClientRequestDispatcher::handleCapabilitiesRequest(const Poco::Net::HTTPReq
 
     LOG_DBG("Wopi capabilities request: " << request.getURI());
     const bool closeConnection = !request.getKeepAlive();
+    std::weak_ptr<StreamSocket> socketWeak(socket);
 
-    AsyncFn convertToAllowedCb = [socket, closeConnection](bool allowedConvert){
-        COOLWSD::getWebServerPoll()->addCallback([socket, allowedConvert, closeConnection]()
-                                                 { sendCapabilities(allowedConvert, closeConnection, socket); });
+    AsyncFn convertToAllowedCb = [socketWeak, closeConnection](bool allowedConvert)
+    {
+        COOLWSD::getWebServerPoll()->addCallback(
+            [socketWeak, allowedConvert, closeConnection]()
+            { sendCapabilities(allowedConvert, closeConnection, socketWeak); });
     };
 
     allowConvertTo(socket->clientAddress(), request, std::move(convertToAllowedCb));

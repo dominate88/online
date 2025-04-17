@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 
 /*
@@ -40,7 +41,10 @@ class OtherViewCellCursorSection extends CanvasSectionObject {
         this.sectionProperties.popUpTimer = null;
     }
 
-    onDraw(frameCount?: number, elapsedTime?: number, subsetBounds?: Bounds): void {
+    onDraw(frameCount?: number, elapsedTime?: number): void {
+        if (app.map._docLayer._isZooming)
+            return;
+
         this.adjustPopUpPosition();
 
         this.context.strokeStyle = this.sectionProperties.color;
@@ -129,7 +133,8 @@ class OtherViewCellCursorSection extends CanvasSectionObject {
     hideUsernamePopUp() {
         if (this.sectionProperties.popUpContainer) {
             this.sectionProperties.popUpShown = false;
-            this.sectionProperties.popUpContainer.style.display = 'none';
+            if (this.sectionProperties.popUpContainer.style.display !== 'none')
+                this.sectionProperties.popUpContainer.style.display = 'none';
         }
         this.clearPopUpTimer();
     }
@@ -143,7 +148,7 @@ class OtherViewCellCursorSection extends CanvasSectionObject {
         let section: OtherViewCellCursorSection;
         let newSection = false;
         if (app.sectionContainer.doesSectionExist(sectionName)) {
-            section = app.sectionContainer.getSectionWithName(sectionName);
+            section = app.sectionContainer.getSectionWithName(sectionName) as OtherViewCellCursorSection;
             section.sectionProperties.part = part;
             section.size[0] = rectangle.pWidth;
             section.size[1] = rectangle.pHeight;
@@ -164,13 +169,16 @@ class OtherViewCellCursorSection extends CanvasSectionObject {
         if (section.showSection && !newSection)
             section.showUsernamePopUp();
 
+        if (!section.showSection)
+            section.hideUsernamePopUp();
+
         app.sectionContainer.requestReDraw();
     }
 
     public static removeView(viewId: number) {
         const sectionName = OtherViewCellCursorSection.sectionNamePrefix + viewId;
         if (app.sectionContainer.doesSectionExist(sectionName)) {
-            const section = app.sectionContainer.getSectionWithName(sectionName);
+            const section = app.sectionContainer.getSectionWithName(sectionName) as OtherViewCellCursorSection;
             OtherViewCellCursorSection.sectionPointers.splice(OtherViewCellCursorSection.sectionPointers.indexOf(section), 1);
             app.sectionContainer.removeSection(sectionName);
             app.sectionContainer.requestReDraw();
@@ -180,9 +188,20 @@ class OtherViewCellCursorSection extends CanvasSectionObject {
     public static updateVisibilities() {
         for (let i = 0; i < OtherViewCellCursorSection.sectionPointers.length; i++) {
             const section = OtherViewCellCursorSection.sectionPointers[i];
-            section.setShowSection(section.checkMyVisibility());
+            const newState = section.checkMyVisibility();
+
+            if (newState !== section.showSection) {
+                section.setShowSection(newState);
+                if (newState === false)
+                    section.hideUsernamePopUp();
+            }
         }
         app.sectionContainer.requestReDraw();
+    }
+
+    public static closePopups() {
+        for (let i = 0; i < OtherViewCellCursorSection.sectionPointers.length; i++)
+            OtherViewCellCursorSection.sectionPointers[i].hideUsernamePopUp();
     }
 
     public static getViewCursorSection(viewId: number) {

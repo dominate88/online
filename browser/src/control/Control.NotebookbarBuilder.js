@@ -772,6 +772,9 @@ $(control.label).unbind('click');
 		if (!data.length)
 			return;
 
+		const inlineLabels = this.options.useInLineLabelsForUnoButtons;
+		this.options.useInLineLabelsForUnoButtons = false;
+
 		data = data[0];
 
 		var type = data.type;
@@ -791,7 +794,7 @@ $(control.label).unbind('click');
 			$('#' + data.id).addClass('hidden-from-event');
 		}
 
-		this.options.useInLineLabelsForUnoButtons = false;
+		this.options.useInLineLabelsForUnoButtons = inlineLabels;
 	},
 
 	// replaces widget in-place with new instance with updated data
@@ -837,6 +840,10 @@ $(control.label).unbind('click');
 				childObject = parent;
 			}
 
+			// allow to detect single toolbuttons stacked on each other
+			if (childType === 'toolbox')
+				childData.hasVerticalParent = hasVerticalParent;
+
 			var handler = this._controlHandlers[childType];
 			var twoPanelsAsChildren =
 			    childData.children && childData.children.length == 2
@@ -853,16 +860,11 @@ $(control.label).unbind('click');
 				} else
 					window.app.console.warn('NotebookbarBuilder: Unsupported control type: "' + childType + '"');
 
-				if (childType === 'toolbox' && hasVerticalParent === true && childData.children.length === 1)
-					this.options.useInLineLabelsForUnoButtons = true;
-
 				if (processChildren && childData.children != undefined)
-					this.build(childObject, childData.children, isVertical, hasManyChildren);
+					this.build(childObject, childData.children, isVertical);
 				else if (childData.visible && (childData.visible === false || childData.visible === 'false')) {
 					$('#' + childData.id).addClass('hidden-from-event');
 				}
-
-				this.options.useInLineLabelsForUnoButtons = false;
 			}
 		}
 	}

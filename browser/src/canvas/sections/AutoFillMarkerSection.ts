@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 
 /*
@@ -12,7 +13,6 @@
 /* See CanvasSectionContainer.ts for explanations. */
 
 declare var L: any;
-declare var app: any;
 
 app.definitions.AutoFillMarkerSection =
 class AutoFillMarkerSection extends CanvasSectionObject {

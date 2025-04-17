@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -33,7 +34,7 @@ class CanvasSectionObject {
 	documentTopLeft: Array<number> = [0, 0]; // Document top left will be updated by container.
 	containerObject: CanvasSectionContainer = null;
 	name: string = null;
-	backgroundColor: string = null; // Defult is null (container's background color will be used).
+	backgroundColor: string = null; // Default is null (container's background color will be used).
 	backgroundOpacity: number = 1; // Valid when backgroundColor is valid.
 	borderColor: string = null; // Default is null (no borders).
 	boundToSection: string = null;
@@ -59,26 +60,28 @@ class CanvasSectionObject {
 
 	onInitialize(): void { return; }
 	onCursorPositionChanged(newPosition: any): void { return; }
-    onCellAddressChanged(): void { return; }
+	onCellAddressChanged(): void { return; }
 	onMouseMove(point: Array<number>, dragDistance: Array<number>, e: MouseEvent): void { return; }
 	onMouseDown(point: Array<number>, e: MouseEvent): void { return; }
 	onMouseUp(point: Array<number>, e: MouseEvent): void { return; }
 	setShowSection(show: boolean): void { return; }
-    onSectionShowStatusChange(): void { return; } /// Called when setShowSection is called.
-    isSectionShown(): boolean { return; }
+	onSectionShowStatusChange(): void { return; } /// Called when setShowSection is called.
+	isSectionShown(): boolean { return; }
 	onDocumentObjectVisibilityChange(): void { return; }
 	onMouseEnter(point: Array<number>, e: MouseEvent): void { return; }
 	onMouseLeave(point: Array<number>, e: MouseEvent): void { return; }
 	onClick(point: Array<number>, e: MouseEvent): void { return; }
 	onDoubleClick(point: Array<number>, e: MouseEvent): void { return; }
 	onContextMenu(e?: MouseEvent): void { return; }
-	onMouseWheel(point: Array<number>, delta: Array<number>, e: MouseEvent): void { return; }
+	onMouseWheel(point: Array<number>, delta: Array<number>, e: WheelEvent): void { return; }
 	onMultiTouchStart(e: TouchEvent): void { return; }
 	onMultiTouchMove(point: Array<number>, dragDistance: number, e: TouchEvent): void { return; }
 	onMultiTouchEnd(e: TouchEvent): void { return; }
 	onResize(): void { return; }
-	onDraw(frameCount?: number, elapsedTime?: number, subsetBounds?: cool.Bounds): void { return; }
+	onDraw(frameCount?: number, elapsedTime?: number): void { return; }
+	onUpdateDOM(): void { return; } // Called before onDraw, to update the DOM if required.
 	onDrawArea(area?: cool.Bounds, paneTopLeft?: cool.Point, canvasContext?: CanvasRenderingContext2D): void { return; } // area is the area to be painted using canvasContext.
+	onAnimate(frameCount: number, elapsedTime: number): void { return; }
 	onAnimationEnded(frameCount: number, elapsedTime: number): void { return; } // frameCount, elapsedTime. Sections that will use animation, have to have this function defined.
 	onNewDocumentTopLeft(size: Array<number>): void { return; }
 	onRemove(): void { return; } // This Function is called right before section is removed.
@@ -90,7 +93,28 @@ class CanvasSectionObject {
 	resetAnimation(): void { return; }
 	getTestDiv(): HTMLDivElement { return; }
 	setPosition(x: number, y: number): void { return; } // Document objects only.
+
+	// All below functions should be included in their respective section definitions (or other classes), not here.
 	isCalcRTL(): boolean { return; }
+	setViewResolved(on: boolean): void { return; }
+	setView(on: boolean): void { return; }
+	scrollVerticalWithOffset(offset: number): void { return; }
+	remove(id: string): void { return; }
+	deleteThis(): void { return; }
+	getActiveEdit(): any { return; }
+	isMobileCommentActive(): boolean { return false; }
+	getMobileCommentModalId(): string { return ''; }
+	rejectAllTrackedCommentChanges(): void { return; }
+	removeHighlighters(): void { return; }
+	showUsernamePopUp(): void { return; }
+	_selectColumn (colNumber: number, modifier: number): void { return; }
+	_selectRow (row: number, modifier: number): void { return; }
+	insertColumnBefore (index: number): void { return; }
+	insertRowAbove (index: number): void { return; }
+	deleteColumn (index: number): void { return; }
+	deleteRow (index: number): void { return; }
+	resetStrokeStyle(): void { return; }
+	hasAnyComments(): boolean { return false; }
 
 	public getLineWidth(): number {
 		if (app.dpiScale > 1.0) {

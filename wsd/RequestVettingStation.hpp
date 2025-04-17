@@ -77,10 +77,13 @@ public:
     }
 
 private:
-    bool createDocBroker(const std::string& docKey, const std::string& configId,
-                         const std::string& url, const Poco::URI& uriPublic);
+    std::shared_ptr<DocumentBroker> createDocBroker(const std::string& docKey,
+                                                    const std::string& configId,
+                                                    const std::string& url,
+                                                    const Poco::URI& uriPublic);
 
-    void createClientSession(const std::string& docKey, const std::string& url,
+    void createClientSession(const std::shared_ptr<DocumentBroker>& docBroker,
+                             const std::string& docKey, const std::string& url,
                              const Poco::URI& uriPublic, bool isReadOnly);
 
     /// Send unauthorized error to the client and disconnect the socket.
@@ -88,9 +91,8 @@ private:
     void sendUnauthorizedErrorAndShutdown();
 
     /// Send an error to the client and disconnect the socket.
-    static void sendErrorAndShutdown(const std::shared_ptr<WebSocketHandler>& ws,
-                                     const std::string& msg,
-                                     WebSocketHandler::StatusCodes statusCode);
+    void sendErrorAndShutdown(const std::string& msg,
+                              WebSocketHandler::StatusCodes statusCode);
 
 #if !MOBILEAPP
     void launchInstallPresets();
@@ -105,7 +107,8 @@ private:
     std::shared_ptr<TerminatingPoll> _poll;
     std::shared_ptr<WebSocketHandler> _ws;
     std::shared_ptr<StreamSocket> _socket;
-    std::shared_ptr<DocumentBroker> _docBroker;
     Util::Stopwatch _birthday;
     unsigned _mobileAppDocId;
 };
+
+/* vim:set shiftwidth=4 softtabstop=4 expandtab: */

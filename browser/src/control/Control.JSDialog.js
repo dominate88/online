@@ -145,6 +145,11 @@ L.Control.JSDialog = L.Control.extend({
 				console.warn('closePopover: no builder');
 		}
 		else {
+			// Close handler for Dropdown which requires to setup aria properties
+			const popupParent = this.dialogs[id].popupParent;
+			if (popupParent && typeof popupParent._onClose === 'function')
+				popupParent._onClose();
+
 			// Need to change focus to last element before we clear the current dialog
 			this.focusToLastElement(id);
 			this.clearDialog(id);
@@ -237,9 +242,9 @@ L.Control.JSDialog = L.Control.extend({
 		return isMenu || isOnlyChild;
 	},
 
-	createContainer: function(instance, parentContainer) {
+	createContainer: function(instance, documentFragment) {
 		// it has to be form to handle default button
-		instance.container = L.DomUtil.create('div', 'jsdialog-window', parentContainer);
+		instance.container = L.DomUtil.create('div', 'jsdialog-window', documentFragment);
 		instance.container.id = instance.id;
 
 		instance.form = L.DomUtil.create('form', 'jsdialog-container ui-dialog ui-widget-content lokdialog_container', instance.container);
@@ -319,7 +324,10 @@ L.Control.JSDialog = L.Control.extend({
 	},
 
 	addFocusHandler: function(instance) {
-		var failedToFindFocus = function() {
+		if (!instance.canHaveFocus)
+			return;
+
+		const failedToFindFocus = () => {
 			if (document.getElementById(instance.init_focus_id))
 				document.getElementById(instance.init_focus_id).focus();
 			else {
@@ -354,7 +362,7 @@ L.Control.JSDialog = L.Control.extend({
 			};
 		}
 
-		if (instance.nonModal) {
+		if (instance.nonModal && instance.haveTitlebar) {
 			instance.titleCloseButton.onclick = function() {
 				var newestDialog = Math.max.apply(null,
 					Object.keys(instance.that.dialogs).map(function(i) { return parseInt(i);}));
@@ -424,7 +432,7 @@ L.Control.JSDialog = L.Control.extend({
 			firstFocusableElement = firstFocusableElement.length > 0 ? firstFocusableElement[0] : firstFocusableElement;
 			firstFocusableElement.focus();
 		}
-		else
+		else if (instance.canHaveFocus !== false)
 			console.error('cannot get focus for widget: "' + instance.init_focus_id + '"');
 
 		if (instance.isDropdown && instance.isSubmenu) {
@@ -696,7 +704,10 @@ L.Control.JSDialog = L.Control.extend({
 		instance.isAutoPopup = instance.isDocumentAreaPopup && this.map._docLayer.isCalc();
 		instance.isAutofilter = instance.isAutoPopup && !instance.isAutoFillPreviewTooltip && !instance.isAutoCompletePopup;// separate the autofilter case
 		instance.containerParent = this.getAutoPopupParentContainer(instance);
-		instance.haveTitlebar = (!instance.isModalPopUp && !instance.isSnackbar) || (instance.hasClose && instance.title && instance.title !== '');
+		instance.hasClose = !!instance.hasClose; // default is true
+		instance.haveTitlebar = instance.hasClose
+			|| (!instance.isModalPopUp && !instance.isSnackbar && instance.hasClose)
+			|| (instance.title && instance.title !== '');
 		instance.nonModal = !instance.isModalPopUp && !instance.isDocumentAreaPopup && !instance.isSnackbar;
 
 		// Make a better seperation between popups and modals.
@@ -719,12 +730,15 @@ L.Control.JSDialog = L.Control.extend({
 			var dialogs = Object.keys(this.dialogs);
 			if (dialogs.length) {
 				var lastKey = dialogs[dialogs.length - 1];
-				var container = this.dialogs[lastKey].container;
-				if (container)
-					container.focus();
-				var initialFocusElement = JSDialog.GetFocusableElements(container);
-				if (initialFocusElement && initialFocusElement.length)
-					initialFocusElement[0].focus();
+				const lastDialog = this.dialogs[lastKey];
+				const lastContainer = lastDialog.container;
+				if (lastDialog.canHaveFocus && lastContainer) {
+					var initialFocusElement = JSDialog.GetFocusableElements(lastContainer);
+					if (initialFocusElement && initialFocusElement.length)
+						initialFocusElement[0].focus();
+					else
+						lastContainer.focus();
+				}
 			} else {
 				this.map.focus();
 			}
@@ -748,26 +762,40 @@ L.Control.JSDialog = L.Control.extend({
 			if (this.map)
 				this.map._progressBar.end();
 
-			this.createContainer(instance, instance.overlay ? instance.overlay: instance.containerParent);
+			const dialogDomParent = instance.overlay ? instance.overlay: instance.containerParent;
+			const documentFragment = new DocumentFragment(); // do not modify dom yet
+
+			this.createContainer(instance, documentFragment);
 			this.createDialog(instance);
-			this.addHandlers(instance);
 
 			// FIXME: remove this auto-bound instance so it will be clear what is passed
 			instance.updatePos = this.setPosition.bind(this, instance);
 
-			// Special case for nonModal dialogues. Core side doesn't send their initial coordinates. We need to center them.
-			if (instance.nonModal && !(instance.startX && instance.startY)) {
-				this.centerDialogPosition(instance);
-			} else {
-				instance.updatePos();
-			}
+			app.layoutingService.appendLayoutingTask(() => {
+				// dialog built - add to DOM now
+				const existingNode = dialogDomParent.querySelector('[id="' + instance.container.id + '"]');
+				if (existingNode)
+					existingNode.replaceWith(instance.container);
+				else
+					dialogDomParent.append(instance.container);
 
-			// AutoPopup  will calculate popup position for Autofilter Popup
-			if (instance.isAutofilter && !instance.isAutoFillPreviewTooltip)
-				this.calculateAutoFilterPosition(instance);
-			else if (instance.isAutoFillPreviewTooltip || instance.isAutoCompletePopup){
-				this.updateAutoPopPosition(instance.container, instance.posx, instance.posy);
-			}
+				// do in task to apply correct focus when already shown
+				this.addHandlers(instance);
+
+				// Special case for nonModal dialogues. Core side doesn't send their initial coordinates. We need to center them.
+				if (instance.nonModal && !(instance.startX && instance.startY)) {
+					this.centerDialogPosition(instance);
+				} else {
+					instance.updatePos();
+				}
+
+				// AutoPopup  will calculate popup position for Autofilter Popup
+				if (instance.isAutofilter && !instance.isAutoFillPreviewTooltip)
+					this.calculateAutoFilterPosition(instance);
+				else if (instance.isAutoFillPreviewTooltip || instance.isAutoCompletePopup){
+					this.updateAutoPopPosition(instance.container, instance.posx, instance.posy);
+				}
+			});
 
 			this.dialogs[instance.id] = instance;
 
@@ -796,15 +824,16 @@ L.Control.JSDialog = L.Control.extend({
 
 		builder.updateWidget(dialog, data.control);
 
-		var dialogInfo = this.dialogs[data.id];
-		if (dialogInfo.isDocumentAreaPopup) {
-			// In case of AutocompletePopup's update data would have posx, posy
-			dialogInfo.updatePos(new L.Point(data.posx, data.posy));
-		}
-
-		// FIXME: remove 100 ms magic timing, drawing areas should request dialog position update
-		//        when they receive payload with bigger content
-		setTimeout(function () { dialogInfo.updatePos(); }, 100);
+		// after widget update we might have bigger content and need to center the dialog again
+		app.layoutingService.appendLayoutingTask(() => {
+			var dialogInfo = this.dialogs[data.id];
+			if (dialogInfo.isDocumentAreaPopup) {
+				// In case of AutocompletePopup's update data would have posx, posy
+				dialogInfo.updatePos(new L.Point(data.posx, data.posy));
+			} else {
+				dialogInfo.updatePos();
+			}
+		});
 	},
 
 	onJSAction: function (e) {
@@ -831,12 +860,14 @@ L.Control.JSDialog = L.Control.extend({
 
 		// focus on element outside view will move viewarea leaving blank space on the bottom
 		if (innerData.action_type === 'grab_focus') {
-			var control = dialogContainer.querySelector('[id=\'' + innerData.control_id + '\']');
-			var controlPosition = control ? control.getBoundingClientRect() : null;
-			if (controlPosition && (controlPosition.bottom > window.innerHeight ||
-				controlPosition.right > window.innerWidth)) {
-				this.centerDialogPosition(dialog); // will center it
-			}
+			app.layoutingService.appendLayoutingTask(() => {
+				var control = dialogContainer.querySelector('[id=\'' + innerData.control_id + '\']');
+				var controlPosition = control ? control.getBoundingClientRect() : null;
+				if (controlPosition && (controlPosition.bottom > window.innerHeight ||
+					controlPosition.right > window.innerWidth)) {
+					this.centerDialogPosition(dialog); // will center it
+				}
+			});
 		}
 
 		builder.executeAction(dialogContainer, innerData);

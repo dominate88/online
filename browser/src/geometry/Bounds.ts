@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 
 declare var L: any;
@@ -167,6 +168,31 @@ export class Bounds {
 		var yIntersects = (max2.y >= min.y) && (min2.y <= max.y);
 
 		return xIntersects && yIntersects;
+	}
+
+	public distanceTo(bounds: Bounds): number {
+		var min = this.min;
+		var max = this.max;
+		var min2 = bounds.min;
+		var max2 = bounds.max;
+		var xIntersects = (max2.x >= min.x) && (min2.x <= max.x);
+		var yIntersects = (max2.y >= min.y) && (min2.y <= max.y);
+		
+		if (xIntersects) {
+			if (yIntersects) return 0;
+			if (max2.y < min.y) return min.y - max2.y;
+			return min2.y - max.y;
+		}
+
+		if (yIntersects) {
+			if (max2.x < min.x) return min.x - max2.x;
+			return min2.x - max.x;
+		}
+
+		var xdist = (min.x > max2.x) ? (min.x - max2.x) : (min2.x - max.x);
+		var ydist = (min.y > max2.y) ? (min.y - max2.y) : (min2.y - max.y);
+
+		return Math.sqrt(xdist * xdist + ydist * ydist);
 	}
 
 	// non-destructive, returns a new Bounds

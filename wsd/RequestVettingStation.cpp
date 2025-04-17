@@ -36,8 +36,7 @@ extern std::pair<std::shared_ptr<DocumentBroker>, std::string>
 findOrCreateDocBroker(DocumentBroker::ChildType type, const std::string& uri,
                       const std::string& docKey, const std::string& configId,
                       const std::string& id, const Poco::URI& uriPublic,
-                      unsigned mobileAppDocId,
-                      std::unique_ptr<WopiStorage::WOPIFileInfo> wopiFileInfo);
+                      unsigned mobileAppDocId);
 
 namespace
 {
@@ -140,8 +139,7 @@ void RequestVettingStation::sendUnauthorizedErrorAndShutdown()
             error += " code=" + base64Encode(sslVerifyResult);
     }
 #endif
-    sendErrorAndShutdown(_ws, error,
-                         WebSocketHandler::StatusCodes::POLICY_VIOLATION);
+    sendErrorAndShutdown(error, WebSocketHandler::StatusCodes::POLICY_VIOLATION);
 }
 
 #if !MOBILEAPP
@@ -152,7 +150,7 @@ namespace
 class SharedSettings
 {
 public:
-    SharedSettings(const Poco::JSON::Object::Ptr wopiInfo)
+    explicit SharedSettings(const Poco::JSON::Object::Ptr& wopiInfo)
     {
         if (auto settingsJSON = wopiInfo->getObject("SharedSettings"))
         {
@@ -189,7 +187,7 @@ void RequestVettingStation::launchInstallPresets()
     if (sharedSettings.getUri().empty())
         return;
 
-    std::string configId = sharedSettings.getConfigId();
+    const std::string& configId = sharedSettings.getConfigId();
 
     auto finishedCallback = [selfWeak = weak_from_this(), this, configId](bool success)
     {
@@ -200,11 +198,8 @@ void RequestVettingStation::launchInstallPresets()
         if (!success)
         {
             LOG_ERR("Failed to install config [" << configId << "]");
-            if (_ws)
-            {
-                sendErrorAndShutdown(_ws, "shared config install failed",
-                                     WebSocketHandler::StatusCodes::UNEXPECTED_CONDITION);
-            }
+            sendErrorAndShutdown("shared config install failed",
+                                 WebSocketHandler::StatusCodes::UNEXPECTED_CONDITION);
         }
         else
         {
@@ -220,7 +215,7 @@ void RequestVettingStation::launchInstallPresets()
     Poco::File(Poco::Path(configIdPresets, "wordbook")).createDirectories();
     Poco::File(Poco::Path(configIdPresets, "template")).createDirectories();
     // ensure the server config is downloaded and populate a subforkit when config is available
-    _asyncInstallTask = DocumentBroker::asyncInstallPresets(*_poll, configId, sharedSettings.getUri(), configIdPresets,
+    _asyncInstallTask = DocumentBroker::asyncInstallPresets(_poll, configId, sharedSettings.getUri(), configIdPresets,
                                                             nullptr, finishedCallback);
 }
 
@@ -238,10 +233,10 @@ void RequestVettingStation::handleRequest(const std::string& id,
     _socket = socket;
     _mobileAppDocId = mobileAppDocId;
 
-    const std::string url = _requestDetails.getDocumentURI();
+    std::string url = _requestDetails.getDocumentURI();
 
     const auto uriPublic = RequestDetails::sanitizeURI(url);
-    const auto docKey = RequestDetails::getDocKey(uriPublic);
+    std::string docKey = RequestDetails::getDocKey(uriPublic);
     const std::string fileId = Uri::getFilenameFromURL(docKey);
     Anonymizer::mapAnonymized(fileId,
                               fileId); // Identity mapping, since fileId is already obfuscated
@@ -280,7 +275,8 @@ void RequestVettingStation::handleRequest(const std::string& id,
 
             // Remove from the current poll and transfer.
             disposition.setMove(
-                [selfLifecycle = shared_from_this(), this, docKey, url, uriPublic,
+                [selfLifecycle = shared_from_this(), this, docKey = std::move(docKey),
+                 url = std::move(url), uriPublic,
                  isReadOnly](const std::shared_ptr<Socket>& moveSocket)
                 {
                     LOG_TRC_S('#' << moveSocket->getFD()
@@ -289,10 +285,10 @@ void RequestVettingStation::handleRequest(const std::string& id,
                                   << docKey << ']');
 
                     // Create the DocBroker.
-                    if (createDocBroker(docKey, "", url, uriPublic))
+                    if (std::shared_ptr<DocumentBroker> docBroker = createDocBroker(docKey, "",
+                                url, uriPublic))
                     {
-                        assert(_docBroker && "Must have docBroker");
-                        createClientSession(docKey, url, uriPublic, isReadOnly);
+                        createClientSession(docBroker, docKey, url, uriPublic, isReadOnly);
                     }
                 });
             break;
@@ -302,7 +298,8 @@ void RequestVettingStation::handleRequest(const std::string& id,
                             << docKey << "] is for a WOPI document");
             // Remove from the current poll and transfer.
             disposition.setMove(
-                [selfLifecycle = shared_from_this(), this, docKey, url, uriPublic,
+                [selfLifecycle = shared_from_this(), this, docKey = std::move(docKey),
+                 url = std::move(url), uriPublic,
                  isReadOnly](const std::shared_ptr<Socket>& moveSocket)
                 {
                     LOG_TRC_S('#' << moveSocket->getFD()
@@ -325,10 +322,10 @@ void RequestVettingStation::handleRequest(const std::string& id,
                         std::string sslVerifyResult = _checkFileInfo->getSslVerifyMessage();
                         // We have a valid CheckFileInfo result; Create the DocBroker.
                         SharedSettings sharedSettings(_checkFileInfo->wopiInfo());
-                        if (createDocBroker(docKey, sharedSettings.getConfigId(), url, uriPublic))
+                        if (std::shared_ptr<DocumentBroker> docBroker = createDocBroker(docKey,
+                                    sharedSettings.getConfigId(), url, uriPublic))
                         {
-                            assert(_docBroker && "Must have docBroker");
-                            createClientSession(docKey, url, uriPublic, isReadOnly);
+                            createClientSession(docBroker, docKey, url, uriPublic, isReadOnly);
                             // If there is anything dubious about the ssl
                             // connection provide a warning about that.
                             if (!sslVerifyResult.empty())
@@ -336,7 +333,7 @@ void RequestVettingStation::handleRequest(const std::string& id,
                                 LOG_WRN_S("SSL verification warning: '" << sslVerifyResult << "' seen on CheckFileInfo for ["
                                               << docKey << "]");
 #if !MOBILEAPP && !WASMAPP
-                                _docBroker->setCertAuditWarning();
+                                docBroker->setCertAuditWarning();
 #endif
                             }
                         }
@@ -385,14 +382,14 @@ void RequestVettingStation::checkFileInfo(const Poco::URI& uri, bool isReadOnly,
             LOG_DBG("WOPI::CheckFileInfo succeeded and will create DocBroker ["
                     << docKey << "] now with URL: [" << url << ']');
             SharedSettings sharedSettings(_checkFileInfo->wopiInfo());
-            if (createDocBroker(docKey, sharedSettings.getConfigId(), url, uriPublic))
+            if (std::shared_ptr<DocumentBroker> docBroker = createDocBroker(docKey,
+                        sharedSettings.getConfigId(), url, uriPublic))
             {
-                assert(_docBroker && "Must have docBroker");
                 launchInstallPresets();
                 if (_ws)
                 {
                     // If we don't have the WebSocket, defer creating the client session.
-                    createClientSession(docKey, url, uriPublic, isReadOnly);
+                    createClientSession(docBroker, docKey, url, uriPublic, isReadOnly);
                 }
                 else
                 {
@@ -422,19 +419,16 @@ void RequestVettingStation::checkFileInfo(const Poco::URI& uri, bool isReadOnly,
 }
 #endif //!MOBILEAPP
 
-bool RequestVettingStation::createDocBroker(const std::string& docKey,
-                                            const std::string& configId,
-                                            const std::string& url,
-                                            const Poco::URI& uriPublic)
+std::shared_ptr<DocumentBroker> RequestVettingStation::createDocBroker(
+        const std::string& docKey, const std::string& configId,
+        const std::string& url, const Poco::URI& uriPublic)
 {
     // Request a kit process for this doc.
-    const auto [docBroker, error] =
+    auto [docBroker, error] =
         findOrCreateDocBroker(DocumentBroker::ChildType::Interactive, url, docKey,
-                              configId, _id, uriPublic,
-                              _mobileAppDocId, /*wopiFileInfo=*/nullptr);
+                              configId, _id, uriPublic, _mobileAppDocId);
 
-    _docBroker = docBroker;
-    if (_docBroker)
+    if (docBroker)
     {
         // Indicate to the client that we're connecting to the docbroker.
         if (_ws)
@@ -445,31 +439,40 @@ bool RequestVettingStation::createDocBroker(const std::string& docKey,
         }
 
         LOG_DBG("DocBroker [" << docKey << "] acquired for [" << url << ']');
-        return true;
+        return docBroker;
     }
 
     // Failed.
     LOG_ERR("Failed to create DocBroker [" << docKey << "]: " << error);
-    if (_ws)
-    {
-        sendErrorAndShutdown(_ws, error, WebSocketHandler::StatusCodes::UNEXPECTED_CONDITION);
-    }
+    sendErrorAndShutdown(error, WebSocketHandler::StatusCodes::UNEXPECTED_CONDITION);
 
-    return false;
+    return nullptr;
 }
 
-void RequestVettingStation::createClientSession(const std::string& docKey, const std::string& url,
+static void sendErrorAndShutdownWS(const std::shared_ptr<WebSocketHandler>& ws,
+                                   const std::string& msg,
+                                   WebSocketHandler::StatusCodes statusCode)
+{
+    if (ws)
+    {
+        ws->sendMessage(msg);
+        ws->shutdown(statusCode, msg); // And ignore input (done in shutdown()).
+    }
+}
+
+void RequestVettingStation::createClientSession(const std::shared_ptr<DocumentBroker>& docBroker,
+                                                const std::string& docKey, const std::string& url,
                                                 const Poco::URI& uriPublic, const bool isReadOnly)
 {
-    assert(_docBroker && "Must have DocBroker");
+    assert(docBroker && "Must have DocBroker");
     assert(_ws && "Must have WebSocket");
 
     std::shared_ptr<ClientSession> clientSession =
-        _docBroker->createNewClientSession(_ws, _id, uriPublic, isReadOnly, _requestDetails);
+        docBroker->createNewClientSession(_ws, _id, uriPublic, isReadOnly, _requestDetails);
     if (!clientSession)
     {
         LOG_ERR("Failed to create Client Session [" << _id << "] on docKey [" << docKey << ']');
-        sendErrorAndShutdown(_ws, "error: cmd=internal kind=load",
+        sendErrorAndShutdown("error: cmd=internal kind=load",
                              WebSocketHandler::StatusCodes::UNEXPECTED_CONDITION);
         return;
     }
@@ -488,13 +491,17 @@ void RequestVettingStation::createClientSession(const std::string& docKey, const
     std::shared_ptr<std::unique_ptr<WopiStorage::WOPIFileInfo>> wopiFileInfo =
         std::make_shared<std::unique_ptr<WopiStorage::WOPIFileInfo>>(std::move(realWopiFileInfo));
 
+    // _socket is now the DocumentBroker poll's responsibility forget about it here
+    std::shared_ptr<StreamSocket> socket = _socket;
+    _socket.reset();
+
     // Transfer the client socket to the DocumentBroker when we get back to the poll:
-    const auto ws = _ws;
-    const auto docBroker = _docBroker;
-    _docBroker->setupTransfer(
-        _socket,
-        [clientSession=std::move(clientSession), uriPublic, wopiFileInfo=std::move(wopiFileInfo),
-         ws, docBroker](const std::shared_ptr<Socket>& moveSocket) mutable
+    std::shared_ptr<WebSocketHandler> ws = _ws;
+    docBroker->setupTransfer(
+        socket,
+        [clientSession = std::move(clientSession), wopiFileInfo = std::move(wopiFileInfo),
+         ws = std::move(ws), docBroker,
+         selfLifecycle = shared_from_this()](const std::shared_ptr<Socket>& moveSocket)
         {
             try
             {
@@ -503,6 +510,7 @@ void RequestVettingStation::createClientSession(const std::string& docKey, const
                 auto streamSocket = std::static_pointer_cast<StreamSocket>(moveSocket);
 
                 // Set WebSocketHandler's socket after its construction for shared_ptr goodness.
+                // Note: this replaces ClientRequestDispatcher, which owns us.
                 streamSocket->setHandler(ws);
 
                 LOG_DBG_S('#' << moveSocket->getFD() << " handler is " << clientSession->getName());
@@ -523,45 +531,42 @@ void RequestVettingStation::createClientSession(const std::string& docKey, const
                 LOG_ERR_S("Unauthorized Request while starting session on "
                           << docBroker->getDocKey() << " for socket #" << moveSocket->getFD()
                           << ". Terminating connection. Error: " << exc.what());
-                sendErrorAndShutdown(ws, "error: cmd=internal kind=unauthorized",
-                                     WebSocketHandler::StatusCodes::POLICY_VIOLATION);
+                sendErrorAndShutdownWS(ws, "error: cmd=internal kind=unauthorized",
+                                       WebSocketHandler::StatusCodes::POLICY_VIOLATION);
             }
             catch (const StorageConnectionException& exc)
             {
                 LOG_ERR_S("Storage error while starting session on "
                           << docBroker->getDocKey() << " for socket #" << moveSocket->getFD()
                           << ". Terminating connection. Error: " << exc.what());
-                sendErrorAndShutdown(ws, "error: cmd=storage kind=loadfailed",
-                                     WebSocketHandler::StatusCodes::POLICY_VIOLATION);
+                sendErrorAndShutdownWS(ws, "error: cmd=storage kind=loadfailed",
+                                       WebSocketHandler::StatusCodes::POLICY_VIOLATION);
             }
             catch (const StorageSpaceLowException& exc)
             {
                 LOG_ERR_S("Disk-Full error while starting session on "
                           << docBroker->getDocKey() << " for socket #" << moveSocket->getFD()
                           << ". Terminating connection. Error: " << exc.what());
-                sendErrorAndShutdown(ws, "error: cmd=internal kind=diskfull",
-                                     WebSocketHandler::StatusCodes::UNEXPECTED_CONDITION);
+                sendErrorAndShutdownWS(ws, "error: cmd=internal kind=diskfull",
+                                       WebSocketHandler::StatusCodes::UNEXPECTED_CONDITION);
             }
             catch (const std::exception& exc)
             {
                 LOG_ERR_S("Error while starting session on "
                           << docBroker->getDocKey() << " for socket #" << moveSocket->getFD()
                           << ". Terminating connection. Error: " << exc.what());
-                sendErrorAndShutdown(ws, "error: cmd=storage kind=loadfailed",
-                                     WebSocketHandler::StatusCodes::POLICY_VIOLATION);
+                sendErrorAndShutdownWS(ws, "error: cmd=storage kind=loadfailed",
+                                       WebSocketHandler::StatusCodes::POLICY_VIOLATION);
             }
         });
 }
 
-void RequestVettingStation::sendErrorAndShutdown(const std::shared_ptr<WebSocketHandler>& ws,
-                                                 const std::string& msg,
+void RequestVettingStation::sendErrorAndShutdown(const std::string& msg,
                                                  WebSocketHandler::StatusCodes statusCode)
 {
-    if (ws)
-    {
-        ws->sendMessage(msg);
-        ws->shutdown(statusCode, msg); // And ignore input (done in shutdown()).
-    }
+    sendErrorAndShutdownWS(_ws, msg, statusCode);
+    // abandon responsibility for _socket now
+    _socket.reset();
 }
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

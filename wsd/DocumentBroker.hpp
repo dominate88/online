@@ -236,15 +236,13 @@ public:
 
     DocumentBroker(ChildType type, const std::string& uri, const Poco::URI& uriPublic,
                    const std::string& docKey, const std::string& configId,
-                   unsigned mobileAppDocId,
-                   std::unique_ptr<WopiStorage::WOPIFileInfo> wopiFileInfo);
+                   unsigned mobileAppDocId);
 
 protected:
     /// Used by derived classes.
     DocumentBroker(ChildType type, const std::string& uri, const Poco::URI& uriPublic,
                    const std::string& docKey, const std::string& configId)
-        : DocumentBroker(type, uri, uriPublic, docKey, configId,
-                         /*mobileAppDocId=*/0, /*wopiFileInfo=*/nullptr)
+        : DocumentBroker(type, uri, uriPublic, docKey, configId, /*mobileAppDocId=*/0)
     {
     }
 
@@ -373,7 +371,7 @@ public:
     /// Transfer this socket into our polling thread / loop.
     void addSocketToPoll(const std::shared_ptr<StreamSocket>& socket);
 
-    SocketPoll& getPoll();
+    std::weak_ptr<SocketPoll> getPoll() const;
 
     void alertAllUsers(const std::string& msg);
 
@@ -546,6 +544,10 @@ public:
 
     StorageBase* getStorage() { return _storage.get(); }
 
+    // mark as dead if poll is not running and no doc loaded after a reasonable
+    // time since construction
+    void timeoutNotLoaded(std::chrono::steady_clock::time_point now);
+
 #if !MOBILEAPP
     void asyncInstallPresets(const std::shared_ptr<ClientSession>& session,
                              const std::string& configId,
@@ -557,13 +559,14 @@ public:
 
     static void sendBrowserSetting(const std::shared_ptr<ClientSession>& session);
 
-    // Return true if parsing of browsersetting is successfull
+    // Return true if parsing of browsersetting is successful
     static bool parseBrowserSettings(const std::shared_ptr<ClientSession>& session,
                                      const std::string& responseBody);
 
     /// Start an asynchronous Installation of the user presets, e.g. autotexts etc, as
     /// described at userSettingsUri for installation into presetsPath
-    static std::shared_ptr<PresetsInstallTask> asyncInstallPresets(SocketPoll& poll,
+    static std::shared_ptr<PresetsInstallTask> asyncInstallPresets(
+                                    const std::shared_ptr<SocketPoll>& poll,
                                     const std::string& configId,
                                     const std::string& userSettingsUri,
                                     const std::string& presetsPath,
@@ -572,7 +575,8 @@ public:
 
     /// Start an asynchronous Installation of a user preset resource, e.g. an autotext
     /// file, to copy as presetFile
-    static void asyncInstallPreset(SocketPoll& poll, const std::string& configId,
+    static void asyncInstallPreset(const std::shared_ptr<SocketPoll>& poll,
+                                   const std::string& configId,
                                    const std::string& presetUri, const std::string& presetStamp,
                                    const std::string& presetFile, const std::string& id,
                                    const std::function<void(const std::string&, bool)>& finishedCB,
@@ -587,8 +591,8 @@ public:
 private:
     /// Checks if we really need to request tile rendering or it's in progress
     /// returns true if all tiles are of the same part and size so can be grouped
-    inline bool requestTileRendering(TileDesc& tile, bool forceKeyFrame,
-                                     const std::chrono::steady_clock::time_point &now,
+    inline bool requestTileRendering(TileDesc& tile, bool forceKeyFrame, int version,
+                                     const std::chrono::steady_clock::time_point now,
                                      std::vector<TileDesc>& tilesNeedsRendering,
                                      const std::shared_ptr<ClientSession>& session);
 
@@ -600,10 +604,6 @@ private:
     std::shared_ptr<ClientSession> getFirstAuthorizedSession() const;
 
     void refreshLock();
-
-    /// Downloads the document ahead-of-time.
-    bool downloadAdvance(const std::string& jailId, const Poco::URI& uriPublic,
-                         std::unique_ptr<WopiStorage::WOPIFileInfo> wopiFileInfo);
 
     /// Loads a document from the public URI into the jail.
     bool download(const std::shared_ptr<ClientSession>& session, const std::string& jailId,
@@ -645,6 +645,10 @@ private:
     /// Returns false if an error prevented issuing the asynchronous request.
     bool updateStorageLockStateAsync(const std::shared_ptr<ClientSession>& session,
                                      StorageBase::LockState lock, std::string& error);
+
+    /// Handle the Un/Lock request result.
+    /// Returns false on failure/unauthorized.
+    bool handleLockResult(ClientSession& session, const StorageBase::LockUpdateResult& result);
 
     std::size_t getIdleTimeSecs() const
     {
@@ -922,18 +926,37 @@ private:
         /// The minimum time to wait between requests.
         std::chrono::milliseconds minTimeBetweenRequests() const { return _minTimeBetweenRequests; }
 
+        /// Returns how long before we can issue a new request now.
+        /// Calculates based on time elapsed since the last request,
+        /// including that more time than half the last request's
+        /// duration has passed.
+        /// When unloading, we reduce throttling significantly.
+        std::chrono::milliseconds timeToNextRequest(bool unloading) const
+        {
+            std::chrono::milliseconds minTimeBetweenRequests =
+                std::max(_minTimeBetweenRequests, _lastRequestDuration);
+            if (unloading)
+            {
+                // More aggressive when unloading.
+                minTimeBetweenRequests /= 10;
+            }
+
+            const auto now = RequestManager::now();
+            const std::chrono::milliseconds timeSinceLastCommunication =
+                std::min(timeSinceLastRequest(now), timeSinceLastResponse(now));
+
+            return (timeSinceLastCommunication >= minTimeBetweenRequests)
+                       ? std::chrono::milliseconds::zero()
+                       : minTimeBetweenRequests - timeSinceLastCommunication;
+        }
+
         /// Checks whether or not we can issue a new request now.
         /// Returns true iff there is no active request and sufficient
-        /// time has elapsed since the last request, including that
-        /// more time than half the last request's duration has passed.
-        /// When unloading, we reduce throttling significantly.
+        /// time has elapsed since the last request.
+        /// See timeToNextRequest() for details.
         bool canRequestNow(bool unloading) const
         {
-            const std::chrono::milliseconds minTimeBetweenRequests =
-                unloading ? _minTimeBetweenRequests / 10 : _minTimeBetweenRequests;
-            const auto now = RequestManager::now();
-            return !isActive() && std::min(timeSinceLastRequest(now), timeSinceLastResponse(now)) >=
-                                      std::max(minTimeBetweenRequests, _lastRequestDuration / 2);
+            return !isActive() && timeToNextRequest(unloading) == std::chrono::milliseconds::zero();
         }
 
         /// Sets the last request's result, either to success or failure.
@@ -1022,7 +1045,7 @@ private:
         {
             if (Log::traceEnabled())
             {
-                std::ostringstream oss;
+                std::ostringstream oss(Util::makeDumpStateStream());
                 dumpState(oss, ", ");
                 LOG_TRC("Created SaveManager: " << oss.str());
             }
@@ -1169,6 +1192,12 @@ private:
         /// 0 for original, as-loaded version.
         std::size_t version() const { return _version.load(); }
 
+        /// Returns the time to next save, or 0 if we can save now.
+        std::chrono::milliseconds timeToNextSave(bool unloading) const
+        {
+            return _request.timeToNextRequest(unloading);
+        }
+
         /// True if we aren't saving and the minimum time since last save has elapsed.
         bool canSaveNow(bool unloading) const { return _request.canRequestNow(unloading); }
 
@@ -1176,15 +1205,15 @@ private:
         {
             const auto now = std::chrono::steady_clock::now();
             os << indent << "version: " << version();
-            os << indent << "isSaving now: " << std::boolalpha << isSaving();
-            os << indent << "idle-save enabled: " << std::boolalpha << isIdleSaveEnabled();
+            os << indent << "isSaving now: " << isSaving();
+            os << indent << "idle-save enabled: " << isIdleSaveEnabled();
             os << indent << "idle-save interval: " << idleSaveInterval();
-            os << indent << "auto-save enabled: " << std::boolalpha << isAutoSaveEnabled();
+            os << indent << "auto-save enabled: " << isAutoSaveEnabled();
             os << indent << "auto-save interval: " << autoSaveInterval();
             os << indent << "check interval: " << _checkInterval;
             os << indent
                << "last auto-save check time: " << Util::getTimeForLog(now, _lastAutosaveCheckTime);
-            os << indent << "auto-save check needed: " << std::boolalpha << needAutoSaveCheck();
+            os << indent << "auto-save check needed: " << needAutoSaveCheck();
 
             os << indent
                << "last save request: " << Util::getTimeForLog(now, lastSaveRequestTime());
@@ -1196,7 +1225,7 @@ private:
             os << indent
                << "file last modified time: " << Util::getTimeForLog(now, _lastModifiedTime);
             os << indent << "saving-timeout: " << getSavingTimeout();
-            os << indent << "last save timed-out: " << std::boolalpha << hasSavingTimedOut();
+            os << indent << "last save timed-out: " << hasSavingTimedOut();
             os << indent << "last save successful: " << lastSaveSuccessful();
             os << indent << "save failure count: " << saveFailureCount();
         }
@@ -1365,13 +1394,19 @@ private:
             return _request.minTimeBetweenRequests();
         }
 
+        /// Returns the time to next upload, or 0 if we can upload now.
+        std::chrono::milliseconds timeToNextUpload(bool unloading) const
+        {
+            return _request.timeToNextRequest(unloading);
+        }
+
         /// True if we aren't uploading and the minimum time since last upload has elapsed.
         bool canUploadNow(bool unloading) const { return _request.canRequestNow(unloading); }
 
         void dumpState(std::ostream& os, const std::string& indent = "\n  ") const
         {
             const auto now = std::chrono::steady_clock::now();
-            os << indent << "isUploading now: " << std::boolalpha << isUploading();
+            os << indent << "isUploading now: " << isUploading();
             os << indent << "last upload request time: "
                << Util::getTimeForLog(now, _request.lastRequestTime());
             os << indent << "last upload response time: "
@@ -1381,8 +1416,7 @@ private:
             os << indent << "last modified time (on server): " << getLastModifiedTime();
             os << indent
                << "file last modified: " << Util::getTimeForLog(now, _lastUploadedFileModifiedTime);
-            os << indent << "last upload was successful: " << std::boolalpha
-               << lastUploadSuccessful();
+            os << indent << "last upload was successful: " << lastUploadSuccessful();
             os << indent << "upload failure count: " << uploadFailureCount();
             os << indent << "size on server: " << _sizeOnServer;
             os << indent << "last upload size: " << _sizeAsUploaded;
@@ -1690,10 +1724,6 @@ private:
     /// The current lock-state update request, if any.
     std::unique_ptr<LockStateUpdateRequest> _lockStateUpdateRequest;
 
-    /// The WopiFileInfo of the initial request loading the document for the first time.
-    /// This has a single-use, and then it's reset.
-    std::unique_ptr<WopiStorage::WOPIFileInfo> _initialWopiFileInfo;
-
     std::unique_ptr<StorageBase> _storage;
 
     /// The Quarantine manager.
@@ -1715,7 +1745,7 @@ private:
     /// Time of the last interactive event that very likely modified the document.
     std::chrono::steady_clock::time_point _lastModifyActivityTime;
 
-    std::chrono::steady_clock::time_point _threadStart;
+    std::chrono::steady_clock::time_point _createTime;
     std::chrono::milliseconds _loadDuration;
     std::chrono::milliseconds _wopiDownloadDuration;
 

@@ -86,15 +86,14 @@ class HttpRequestTests final : public CPPUNIT_NS::TestFixture
     static constexpr std::chrono::seconds DefTimeoutSeconds{ 5 };
 
     std::string _localUri;
-    SocketPoll _pollServerThread;
-    std::shared_ptr<ServerSocket> _socket;
+    std::shared_ptr<SocketPoll> _pollServerThread;
     int _port;
 
     static const int SimulatedLatencyMs = 0;
 
 public:
     HttpRequestTests()
-        : _pollServerThread("HttpServerPoll")
+        : _pollServerThread(std::make_shared<SocketPoll>("HttpServerPoll"))
         , _port(0)
     {
         net::AsyncDNS::startAsyncDNS();
@@ -148,13 +147,14 @@ public:
         std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
         std::shared_ptr<SocketFactory> factory = std::make_shared<ServerSocketFactory>();
         _port = 9990;
+        std::shared_ptr<ServerSocket> socket;
         for (int i = 0; i < 40; ++i, ++_port)
         {
             // Try listening on this port.
             LOG_INF("HttpRequestTests::setUp: creating socket to listen on port " << _port);
-            _socket = ServerSocket::create(ServerSocket::Type::Local, _port, Socket::Type::IPv4,
-                                           now, _pollServerThread, factory);
-            if (_socket)
+            socket = ServerSocket::create(ServerSocket::Type::Local, _port, Socket::Type::IPv4,
+                                           now, *_pollServerThread, factory);
+            if (socket)
                 break;
         }
 
@@ -163,15 +163,14 @@ public:
         else
             _localUri = "http://127.0.0.1:" + std::to_string(_port);
 
-        _pollServerThread.startThread();
-        _pollServerThread.insertNewSocket(_socket);
+        _pollServerThread->startThread();
+        _pollServerThread->insertNewSocket(socket);
     }
 
     void tearDown()
     {
         LOG_INF("HttpRequestTests::tearDown");
-        _pollServerThread.stop();
-        _socket.reset();
+        _pollServerThread->stop();
     }
 };
 
@@ -213,9 +212,7 @@ void HttpRequestTests::testBadResponse()
 {
     constexpr auto testname = __func__;
 
-    const std::string URL = "/inject/" + Util::bytesToHexString("\0\0xa", 2);
-
-    http::Request httpRequest(URL);
+    http::Request httpRequest(std::string("/inject/" + HexUtil::bytesToHexString("\0\0xa", 2)));
 
     auto httpSession = http::Session::create(_localUri);
     if (httpSession)
@@ -238,7 +235,7 @@ void HttpRequestTests::testGoodResponse()
     // Date: Wed, 02 Jun 2021 02:30:52 GMT
     // Content-Type: text/html; charset=utf-8
     // Content-Length: 0
-    const std::string URL =
+    constexpr auto URL =
         "/inject/"
         "485454502F312E3120323030204F4B0D0A446174653A205765642C203032204A756E20323032312030323A3330"
         "3A353220474D540D0A436F6E74656E742D547970653A20746578742F68746D6C3B20636861727365743D757466"
@@ -278,8 +275,8 @@ void HttpRequestTests::testSimpleGet()
     constexpr auto URL = "/";
 
     // Start the polling thread.
-    SocketPoll pollThread("AsyncReqPoll");
-    pollThread.startThread();
+    std::shared_ptr<SocketPoll> pollThread = std::make_shared<SocketPoll>("AsyncReqPoll");
+    pollThread->startThread();
 
     http::Request httpRequest(URL);
 
@@ -335,7 +332,7 @@ void HttpRequestTests::testSimpleGet()
         LOK_ASSERT_EQUAL(pocoResponse.second, httpResponse->getBody());
     }
 
-    pollThread.joinThread();
+    pollThread->joinThread();
 }
 
 void HttpRequestTests::testSimpleGetSync()
@@ -344,12 +341,12 @@ void HttpRequestTests::testSimpleGetSync()
 
     const auto data = Util::rng::getHexString(Util::rng::getNext() % 1024);
     const auto body = std::string(data.data(), data.size());
-    const std::string URL = "/echo/" + body;
+    std::string URL = "/echo/" + body;
     TST_LOG("Requesting URI: [" << URL << ']');
 
     const auto pocoResponse = helpers::pocoGet(Poco::URI(_localUri + URL));
 
-    http::Request httpRequest(URL);
+    http::Request httpRequest(std::move(URL));
 
     auto httpSession = http::Session::create(_localUri);
     httpSession->setTimeout(std::chrono::seconds(1));
@@ -381,12 +378,12 @@ void HttpRequestTests::testChunkedGetSync()
 
     const auto data = Util::rng::getHexString(Util::rng::getNext() % 1024);
     const auto body = std::string(data.data(), data.size());
-    const std::string URL = "/echo/chunked/" + body;
+    std::string URL = "/echo/chunked/" + body;
     TST_LOG("Requesting URI: [" << URL << ']');
 
     const auto pocoResponse = helpers::pocoGet(Poco::URI(_localUri + URL));
 
-    http::Request httpRequest(URL);
+    http::Request httpRequest(std::move(URL));
 
     auto httpSession = http::Session::create(_localUri);
     httpSession->setTimeout(DefTimeoutSeconds);
@@ -417,12 +414,12 @@ void HttpRequestTests::testChunkedGetSync_External()
     constexpr auto testname = "chunkedGetSync_External";
 
     const std::string hostname = "http://anglesharp.azurewebsites.net";
-    const std::string URL = "/Chunked";
+    std::string URL = "/Chunked";
     TST_LOG("Requesting URI: [" << hostname << URL << ']');
 
     const auto pocoResponse = helpers::pocoGet(Poco::URI(hostname + URL));
 
-    http::Request httpRequest(URL);
+    http::Request httpRequest(std::move(URL));
 
     auto httpSession = http::Session::create(hostname);
     httpSession->setTimeout(DefTimeoutSeconds);
@@ -507,8 +504,8 @@ void HttpRequestTests::test500GetStatuses()
     };
 
     // Start the polling thread.
-    SocketPoll pollThread("AsyncReqPoll");
-    pollThread.startThread();
+    std::shared_ptr<SocketPoll> pollThread = std::make_shared<SocketPoll>("AsyncReqPoll");
+    pollThread->startThread();
 
     constexpr http::StatusLine::StatusCodeClass statusCodeClasses[] = {
         http::StatusLine::StatusCodeClass::Informational,
@@ -589,19 +586,18 @@ void HttpRequestTests::test500GetStatuses()
         }
     }
 
-    pollThread.joinThread();
+    pollThread->joinThread();
 }
 
 void HttpRequestTests::testSimplePost_External()
 {
     constexpr auto testname = __func__;
 
-    const std::string Host = "httpbin.org";
     const char* URL = "/post";
 
     // Start the polling thread.
-    SocketPoll pollThread("AsyncReqPoll");
-    pollThread.startThread();
+    std::shared_ptr<SocketPoll> pollThread = std::make_shared<SocketPoll>("AsyncReqPoll");
+    pollThread->startThread();
 
     http::Request httpRequest(URL, http::Request::VERB_POST);
 
@@ -614,7 +610,7 @@ void HttpRequestTests::testSimplePost_External()
 
     httpRequest.setBodyFile(path);
 
-    auto httpSession = http::Session::createHttpSsl(Host);
+    auto httpSession = http::Session::createHttpSsl("httpbin.org");
     httpSession->setTimeout(DefTimeoutSeconds);
 
     std::condition_variable cv;
@@ -649,7 +645,7 @@ void HttpRequestTests::testSimplePost_External()
     std::cerr << "[" << body << "]\n";
     LOK_ASSERT(body.find(data) != std::string::npos);
 
-    pollThread.joinThread();
+    pollThread->joinThread();
 }
 
 void HttpRequestTests::testTimeout()

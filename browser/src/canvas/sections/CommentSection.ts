@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 
 /*
@@ -12,8 +13,6 @@
 /* See CanvasSectionContainer.ts for explanations. */
 
 declare var L: any;
-declare var app: any;
-declare var _: any;
 declare var Autolinker: any;
 declare var DOMPurify : any;
 
@@ -313,6 +312,14 @@ export class Comment extends CanvasSectionObject {
 		this.sectionProperties.childLinesNode.style.width = this.sectionProperties.childCommentOffset*(this.getChildLevel() + 1) + 'px';
 	}
 
+	public getContainerPosX(): number {
+		return parseInt(this.sectionProperties.container.style.left.replace('px', ''));
+	}
+
+	public getContainerPosY(): number {
+		return parseInt(this.sectionProperties.container.style.top.replace('px', ''));
+	}
+
 	public updateChildLines (): void {
 		if (!this.isContainerVisible())
 			return;
@@ -323,19 +330,16 @@ export class Comment extends CanvasSectionObject {
 		for (let i = 0; i < this.sectionProperties.children.length; i++) {
 			if (this.sectionProperties.children[i].isContainerVisible())
 				childPositions.push({ id: this.sectionProperties.children[i].sectionProperties.data.id,
-									posY: this.sectionProperties.children[i].sectionProperties.container._leaflet_pos.y});
+									posY: this.getContainerPosY()});
 		}
 		childPositions.sort((a, b) => { return a.posY - b.posY; });
-		let lastPosY = this.sectionProperties.container._leaflet_pos.y + this.getCommentHeight(false);
+		let lastPosY = this.getContainerPosY() + this.getCommentHeight(false);
 		let i = 0;
 		for (; i < childPositions.length; i++) {
 			if (this.sectionProperties.childLines[i] === undefined) {
 				this.sectionProperties.childLines[i] = L.DomUtil.create('div', 'cool-annotation-child-line', this.sectionProperties.childLinesNode);
 				this.sectionProperties.childLines[i].id = 'annotation-child-line-' + this.sectionProperties.data.id + '-' + i;
 				this.sectionProperties.childLines[i].style.width = this.sectionProperties.childCommentOffset/2 + 'px';
-				// this.sectionProperties.childLines[i].style.borderStyle = 'none none dashed dashed';
-				// this.sectionProperties.childLines[i].style.borderWidth = 'thin';
-				// this.sectionProperties.childLines[i].style.borderColor = 'darkgray';
 			}
 			this.sectionProperties.childLines[i].style.marginLeft =  (this.sectionProperties.childCommentOffset*this.getChildLevel() + 4) + 'px';
 			this.sectionProperties.childLines[i].style.height = (childPositions[i].posY + 24 - lastPosY) + 'px';

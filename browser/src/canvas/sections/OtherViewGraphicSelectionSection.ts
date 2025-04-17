@@ -35,7 +35,7 @@ class OtherViewGraphicSelectionSection extends CanvasSectionObject {
         this.sectionProperties.mode = mode;
     }
 
-    onDraw(frameCount?: number, elapsedTime?: number, subsetBounds?: Bounds): void {
+    onDraw(frameCount?: number, elapsedTime?: number): void {
         this.context.strokeStyle = this.sectionProperties.color;
         this.context.lineWidth = 2;
         this.context.strokeRect(-0.5, -0.5, this.size[0], this.size[1]);
@@ -61,7 +61,7 @@ class OtherViewGraphicSelectionSection extends CanvasSectionObject {
         const sectionName = OtherViewGraphicSelectionSection.sectionNamePrefix + viewId;
         let section: OtherViewGraphicSelectionSection;
         if (app.sectionContainer.doesSectionExist(sectionName)) {
-            section = app.sectionContainer.getSectionWithName(sectionName);
+            section = app.sectionContainer.getSectionWithName(sectionName) as OtherViewGraphicSelectionSection;
             section.sectionProperties.part = part;
             section.sectionProperties.mode = mode;
             section.size[0] = rectangle.pWidth;
@@ -81,7 +81,7 @@ class OtherViewGraphicSelectionSection extends CanvasSectionObject {
     public static removeView(viewId: number) {
         const sectionName = OtherViewGraphicSelectionSection.sectionNamePrefix + viewId;
         if (app.sectionContainer.doesSectionExist(sectionName)) {
-            const section = app.sectionContainer.getSectionWithName(sectionName);
+            const section = app.sectionContainer.getSectionWithName(sectionName) as OtherViewGraphicSelectionSection;
             OtherViewGraphicSelectionSection.sectionPointers.splice(OtherViewGraphicSelectionSection.sectionPointers.indexOf(section), 1);
             app.sectionContainer.removeSection(sectionName);
             app.sectionContainer.requestReDraw();

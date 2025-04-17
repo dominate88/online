@@ -1,3 +1,4 @@
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4; fill-column: 100 -*- */
 
 #include "config.h"
 
@@ -23,7 +24,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size)
     Poco::URI uriPublic;
     std::string docKey = "/fuzz/fuzz.odt";
     auto docBroker = std::make_shared<DocumentBroker>(DocumentBroker::ChildType::Interactive, uri,
-                                                      uriPublic, docKey, "", 0, nullptr);
+                                                      uriPublic, docKey, "", 0);
 
     std::shared_ptr<ProtocolHandlerInterface> ws;
     std::string id;

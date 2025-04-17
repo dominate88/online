@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -139,7 +140,7 @@ class SnackbarController {
 			eventType: string,
 			object: any,
 			data: any,
-			builder: any,
+			builder: JSBuilder,
 		) => {
 			window.app.console.debug(
 				"control: '" +

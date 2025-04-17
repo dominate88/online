@@ -28,7 +28,8 @@
 #include <TileCache.hpp>
 #include <kit/Delta.hpp>
 #include <Unit.hpp>
-#include <Util.hpp>
+#include <common/HexUtil.hpp>
+#include <common/Util.hpp>
 
 #include <helpers.hpp>
 #include <test.hpp>
@@ -280,7 +281,7 @@ void TileCacheTests::testSimpleCombine()
 
     sendTextFrame(socket1, "tilecombine nviewid=0 part=0 width=256 height=256 tileposx=0,3840 tileposy=0,0 oldwid=42,42 tilewidth=3840 tileheight=3840");
     tile1a = getResponseMessage(socket1, "delta:", testname + "1 ", std::chrono::seconds(10));
-//  TST_LOG("Response is: " + Util::dumpHex(tile1a) << "\n");
+    //  TST_LOG("Response is: " + HexUtil::dumpHex(tile1a) << "\n");
     // no content in an update delta: - so ends with a '\n'
     LOK_ASSERT_MESSAGE("did not receive an update delta: message as expected", !tile1a.empty() && tile1a.back() == '\n');
     tile1b = getResponseMessage(socket1, "delta:", testname + "1 ");
@@ -1161,7 +1162,7 @@ void TileCacheTests::testTileInvalidatePartCalc()
     assertResponseString(socket2, "setpart:", testname2);
     sendTextFrame(socket2, "mouse type=buttondown x=1500 y=1500 count=1 buttons=1 modifier=0", testname2);
 
-    static const std::string text = "Some test";
+    constexpr std::string_view text = "Some test";
     for (char ch : text)
     {
         sendChar(socket1, ch, skNone, testname);
@@ -1210,7 +1211,7 @@ void TileCacheTests::testTileInvalidatePartImpress()
     sendTextFrame(socket2, "mouse type=buttondown x=1500 y=1500 count=1 buttons=1 modifier=0", testname2);
 
     // This should be short, as in odp the font is large and we leave the page otherwise.
-    static const std::string text = "Some test";
+    constexpr std::string_view text = "Some test";
     for (char ch : text)
     {
         sendChar(socket1, ch, skNone, testname);

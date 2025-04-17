@@ -66,7 +66,6 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 	},
 
 	beforeAdd: function (map) {
-		app.file.textCursor.visible = false;
 		map._addZoomLimit(this);
 		map.on('zoomend', this._onZoomRowColumns, this);
 		map.on('updateparts', this._onUpdateParts, this);
@@ -210,8 +209,8 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 			limitMargin.y *= 8;
 		}
 
-		var limitWidth = mapPosTwips.x + mapSizeTwips.x < lastCellTwips.x;
-		var limitHeight = mapPosTwips.y + mapSizeTwips.y < lastCellTwips.y;
+		var limitWidth = mapPosTwips.x + mapSizeTwips.x < lastCellTwips.x && !this.widthShrinked;
+		var limitHeight = mapPosTwips.y + mapSizeTwips.y < lastCellTwips.y && !this.heightShrinked;
 
 		// limit to data area only (and map size for margin)
 		if (limitWidth)
@@ -246,8 +245,6 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		var bottomRight = this._map.unproject(newSizePx);
 
 		this._docPixelSize = newSizePx.clone();
-		app.file.size.x = newDocWidth;
-		app.file.size.y = newDocHeight;
 		app.file.size = new cool.SimplePoint(newDocWidth, newDocHeight);
 		app.view.size = app.file.size.clone();
 
@@ -350,12 +347,16 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		if (fileSizePixels[0] < availableSpace[0]) {
 			newMapSize[0] = fileSizePixels[0];
 			newCanvasSize[0] = fileSizePixels[0] + marginLeft + scrollBarThickness;
+			this.widthShrinked = true;
 		}
+		else this.widthShrinked = false;
 
 		if (fileSizePixels[1] < availableSpace[1]) {
 			newMapSize[1] = fileSizePixels[1];
 			newCanvasSize[1] = fileSizePixels[1] + marginTop + scrollBarThickness;
+			this.heightShrinked = true;
 		}
+		else this.heightShrinked = false;
 
 		newMapSize = [Math.round(newMapSize[0] / app.dpiScale), Math.round(newMapSize[1] / app.dpiScale)];
 		newCanvasSize = [Math.round(newCanvasSize[0] / app.dpiScale), Math.round(newCanvasSize[1] / app.dpiScale)];
@@ -387,8 +388,8 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 
 		// Document container size is up to date as of now.
 		const documentContainerSize = this._getDocumentContainerSize();
-		documentContainerSize[0] *= app.dpiScale;
-		documentContainerSize[1] *= app.dpiScale;
+		documentContainerSize[0] = Math.round(app.dpiScale * documentContainerSize[0]);
+		documentContainerSize[1] = Math.round(app.dpiScale * documentContainerSize[1]);
 
 		// Size has changed. Our map and canvas are not resized yet.
 		// But the row header, row group, column header and column group sections don't need to be resized.
@@ -405,34 +406,32 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		// Early exit. If there is no need to update the size, return here.
 		if (oldMapSize[0] === newMapSize[0] && oldMapSize[1] === newMapSize[1])
 			return false;
+		else {
+			this._resizeMapElementAndTilesLayer(mapElement, marginLeft, marginTop, newMapSize);
 
-		this._resizeMapElementAndTilesLayer(mapElement, marginLeft, marginTop, newMapSize);
+			const widthIncreased = oldMapSize[0] < newMapSize[0];
+			const heightIncreased = oldMapSize[1] < newMapSize[1];
 
-		app.sectionContainer.onResize(newCanvasSize[0], newCanvasSize[1]); // Canvas's size = documentContainer's size.
-
-		this._updateHeaderSections();
-
-		const widthIncreased = oldMapSize[0] < newMapSize[0];
-		const heightIncreased = oldMapSize[1] < newMapSize[1];
-
-		if (oldMapSize[0] !== newMapSize[0] || oldMapSize[1] !== newMapSize[1])
 			this._map.invalidateSize({}, new L.Point(oldMapSize[0], oldMapSize[1]));
+			app.sectionContainer.onResize(newCanvasSize[0], newCanvasSize[1]); // Canvas's size = documentContainer's size.
+			this._updateHeaderSections();
 
-		this._mobileChecksAfterResizeEvent(heightIncreased);
+			this._mobileChecksAfterResizeEvent(heightIncreased);
 
-		// Center the view w.r.t the new map-pane position using the current zoom.
-		this._map.setView(this._map.getCenter());
+			// Center the view w.r.t the new map-pane position using the current zoom.
+			this._map.setView(this._map.getCenter());
 
-		// We want to keep cursor visible when we show the keyboard on mobile device or tablet
-		this._nonDesktopChecksAfterResizeEvent(heightIncreased);
+			// We want to keep cursor visible when we show the keyboard on mobile device or tablet
+			this._nonDesktopChecksAfterResizeEvent(heightIncreased);
 
-		if (heightIncreased || widthIncreased) {
-			app.sectionContainer.requestReDraw();
-			this._map.fire('sizeincreased');
-			return true;
+			if (heightIncreased || widthIncreased) {
+				app.sectionContainer.requestReDraw();
+				this._map.fire('sizeincreased');
+				return true;
+			}
+
+			return false;
 		}
-
-		return false;
 	},
 
 	_onStatusMsg: function (textMsg) {
@@ -912,7 +911,7 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 			*/
 			this.insertMode = e.state.trim() === '' ? false: true;
 			if (!this.insertMode) {
-				app.file.textCursor.visible = false;
+				app.setCursorVisibility(false);
 				if (this._map._docLayer._cursorMarker)
 					this._map._docLayer._cursorMarker.remove();
 			}
@@ -1159,9 +1158,9 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 			var reference = new CPolygon(pointSet, {
 				pointerEvents: 'none',
 				fillColor: strColor,
-				fillOpacity: 0.25,
+				fillOpacity: 0.15,
 				weight: 2 * app.dpiScale,
-				opacity: 0.25});
+				opacity: 0.15});
 
 			references.push({mark: reference, part: part, type: 'focuscell'});
 			this._referencesAll.push(references[i]);

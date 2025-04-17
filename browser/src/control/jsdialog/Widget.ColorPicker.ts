@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -23,10 +24,6 @@ interface ColorPaletteWidgetData {
 type ColorItem = string;
 type CoreColorPalette = Array<Array<{ Value: ColorItem }>>;
 type ColorPalette = Array<Array<ColorItem>>;
-
-interface Window {
-	prefs: any;
-}
 
 function getCurrentPaletteName(): string {
 	const palette = window.prefs.get('colorPalette');
@@ -90,7 +87,7 @@ function generatePalette(paletteName: string) {
 
 function createColor(
 	parentContainer: HTMLElement,
-	builder: any,
+	builder: JSBuilder,
 	colorItem: ColorItem,
 	index: string,
 	themeData: any,
@@ -131,7 +128,7 @@ function createColor(
 
 function handleColorSelection(
 	target: HTMLElement,
-	builder: any,
+	builder: JSBuilder,
 	widgetData: ColorPaletteWidgetData,
 ) {
 	const palette = generatePalette(getCurrentPaletteName());
@@ -168,7 +165,7 @@ function handleColorSelection(
 function createAutoColorButton(
 	parentContainer: HTMLElement,
 	data: ColorPaletteWidgetData,
-	builder: any,
+	builder: JSBuilder,
 ) {
 	// Create a div container for the button
 	const buttonContainer = L.DomUtil.create(
@@ -198,7 +195,7 @@ function createAutoColorButton(
 
 function createPaletteSwitch(
 	parentContainer: HTMLElement,
-	builder: any,
+	builder: JSBuilder,
 ): HTMLSelectElement {
 	const paletteListbox = L.DomUtil.create(
 		'div',
@@ -234,7 +231,7 @@ function createPaletteSwitch(
 function updatePalette(
 	paletteName: string,
 	data: ColorPaletteWidgetData,
-	builder: any,
+	builder: JSBuilder,
 	paletteContainer: HTMLElement,
 	customContainer: HTMLElement,
 	recentContainer: HTMLElement,
@@ -332,7 +329,7 @@ function updatePalette(
 JSDialog.colorPicker = function (
 	parentContainer: Element,
 	data: ColorPaletteWidgetData,
-	builder: any,
+	builder: JSBuilder,
 ) {
 	const container = L.DomUtil.create('div', 'ui-color-picker', parentContainer);
 	container.id = data.id;

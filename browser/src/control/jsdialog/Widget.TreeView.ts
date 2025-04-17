@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -59,7 +60,6 @@
  */
 
 declare var JSDialog: any;
-declare var app: any;
 
 // TODO: remove this hack
 var lastClickHelperRow: string | number = -1;
@@ -78,7 +78,7 @@ class TreeViewControl {
 	_singleClickActivate: boolean;
 	_filterTimer: ReturnType<typeof setTimeout>;
 
-	constructor(data: TreeWidgetJSON, builder: any) {
+	constructor(data: TreeWidgetJSON, builder: JSBuilder) {
 		this._isRealTree = this.isRealTree(data);
 		this._container = L.DomUtil.create(
 			'div',
@@ -166,7 +166,7 @@ class TreeViewControl {
 	changeCheckboxStateOnClick(
 		checkbox: HTMLInputElement,
 		treeViewData: TreeWidgetJSON,
-		builder: any,
+		builder: JSBuilder,
 		entry: TreeEntryJSON,
 	) {
 		let foundEntry: TreeEntryJSON;
@@ -216,7 +216,7 @@ class TreeViewControl {
 	createRadioButton(
 		parent: HTMLElement,
 		treeViewData: TreeWidgetJSON,
-		builder: any,
+		builder: JSBuilder,
 		entry: TreeEntryJSON,
 	) {
 		const radioButton = L.DomUtil.create(
@@ -237,7 +237,7 @@ class TreeViewControl {
 		parent: HTMLElement,
 		treeViewData: TreeWidgetJSON,
 		entry: TreeEntryJSON,
-		builder: any,
+		builder: JSBuilder,
 	) {
 		let selectionElement: HTMLInputElement;
 		const checkboxtype = treeViewData.checkboxtype;
@@ -301,7 +301,7 @@ class TreeViewControl {
 
 	createImageColumn(
 		parentContainer: HTMLElement,
-		builder: any,
+		builder: JSBuilder,
 		imageUrl: string,
 	) {
 		const colorPreviewButton = L.DomUtil.create(
@@ -326,7 +326,7 @@ class TreeViewControl {
 		return false;
 	}
 
-	fillHeader(header: TreeHeaderJSON, builder: any) {
+	fillHeader(header: TreeHeaderJSON, builder: JSBuilder) {
 		if (!header) return;
 
 		const th = L.DomUtil.create(
@@ -354,7 +354,7 @@ class TreeViewControl {
 	fillRow(
 		data: TreeWidgetJSON,
 		entry: TreeEntryJSON,
-		builder: any,
+		builder: JSBuilder,
 		level: number,
 		parent: HTMLElement,
 	) {
@@ -366,6 +366,7 @@ class TreeViewControl {
 		let dummyColumns = 0;
 		if (this._hasState) dummyColumns++;
 		tr.style.gridColumn = '1 / ' + (this._columns + dummyColumns + 1);
+		tr.setAttribute('tabindex', 0);
 
 		let selectionElement;
 		if (this._hasState) {
@@ -392,7 +393,7 @@ class TreeViewControl {
 		}
 	}
 
-	setupDragAndDrop(treeViewData: TreeWidgetJSON, builder: any) {
+	setupDragAndDrop(treeViewData: TreeWidgetJSON, builder: JSBuilder) {
 		if (treeViewData.enabled !== false) {
 			this._container.ondrop = (ev) => {
 				ev.preventDefault();
@@ -410,7 +411,7 @@ class TreeViewControl {
 		tr: HTMLElement,
 		treeViewData: TreeWidgetJSON,
 		entry: TreeEntryJSON,
-		builder: any,
+		builder: JSBuilder,
 	) {
 		if (treeViewData.enabled !== false && entry.state == null) {
 			tr.draggable = treeViewData.draggable === false ? false : true;
@@ -463,7 +464,7 @@ class TreeViewControl {
 		parent: HTMLElement,
 		entry: TreeEntryJSON,
 		index: any,
-		builder: any,
+		builder: JSBuilder,
 	) {
 		const icon = L.DomUtil.create('img', 'ui-treeview-icon', parent);
 
@@ -481,7 +482,7 @@ class TreeViewControl {
 		parent: HTMLElement,
 		entry: TreeEntryJSON,
 		index: any,
-		builder: any,
+		builder: JSBuilder,
 	) {
 		const cell = L.DomUtil.create(
 			'span',
@@ -495,7 +496,7 @@ class TreeViewControl {
 		parent: HTMLElement,
 		entry: TreeEntryJSON,
 		index: any,
-		builder: any,
+		builder: JSBuilder,
 	) {
 		const cell = L.DomUtil.create(
 			'span',
@@ -509,7 +510,7 @@ class TreeViewControl {
 
 	fillCells(
 		entry: TreeEntryJSON,
-		builder: any,
+		builder: JSBuilder,
 		treeViewData: TreeWidgetJSON,
 		tr: HTMLElement,
 		level: number,
@@ -539,6 +540,8 @@ class TreeViewControl {
 		// regular columns
 		for (const index in entry.columns) {
 			td = L.DomUtil.create('div', '', tr);
+			if (entry.text) td.setAttribute('data-cooltip', entry.text);
+			L.control.attachTooltipEventListener(td, builder.map);
 			rowElements.push(td);
 
 			span = L.DomUtil.create(
@@ -634,7 +637,7 @@ class TreeViewControl {
 		tr: HTMLElement,
 		entry: TreeEntryJSON,
 		treeViewData: TreeWidgetJSON,
-		builder: any,
+		builder: JSBuilder,
 	) {
 		tr.addEventListener('contextmenu', (e: Event) => {
 			builder.callback(
@@ -652,7 +655,7 @@ class TreeViewControl {
 		tr: HTMLElement,
 		entry: TreeEntryJSON,
 		treeViewData: TreeWidgetJSON,
-		builder: any,
+		builder: JSBuilder,
 		selectionElement: HTMLInputElement,
 		expander: HTMLElement,
 		clickFunction: any,
@@ -724,6 +727,9 @@ class TreeViewControl {
 			} else if (event.key === 'Enter' || event.key === ' ') {
 				clickFunction();
 				if (selectionElement) selectionElement.click();
+				if (expander) {
+					expander.click();
+				}
 				tr.focus();
 				event.preventDefault();
 				event.stopPropagation();
@@ -737,7 +743,7 @@ class TreeViewControl {
 		span: HTMLElement,
 		treeViewData: TreeWidgetJSON,
 		entry: TreeEntryJSON,
-		builder: any,
+		builder: JSBuilder,
 	) {
 		if (entry.enabled === false) return;
 
@@ -758,7 +764,7 @@ class TreeViewControl {
 		span: HTMLElement,
 		treeViewData: TreeWidgetJSON,
 		entry: TreeEntryJSON,
-		builder: any,
+		builder: JSBuilder,
 	) {
 		if (entry.enabled === false) return;
 
@@ -790,7 +796,7 @@ class TreeViewControl {
 		checkbox: HTMLInputElement,
 		select: boolean,
 		activate: boolean,
-		builder: any,
+		builder: JSBuilder,
 		treeViewData: TreeWidgetJSON,
 		entry: TreeEntryJSON,
 	) {
@@ -867,7 +873,7 @@ class TreeViewControl {
 		}, 100);
 	}
 
-	setupKeyEvents(data: TreeWidgetJSON, builder: any) {
+	setupKeyEvents(data: TreeWidgetJSON, builder: JSBuilder) {
 		this._container.addEventListener('keydown', (event) => {
 			const listElements =
 				this._container.querySelectorAll('.ui-treeview-entry');
@@ -943,7 +949,7 @@ class TreeViewControl {
 	handleKeyEvent(
 		event: KeyboardEvent,
 		nodeList: NodeList,
-		builder: any,
+		builder: JSBuilder,
 		data: TreeWidgetJSON,
 	) {
 		var preventDef = false;
@@ -978,7 +984,8 @@ class TreeViewControl {
 			preventDef = true;
 		} else if (
 			data.fireKeyEvents &&
-			builder.callback(
+			// FIXME: can callback return boolean?
+			(builder as any).callback(
 				'treeview',
 				'keydown',
 				{ id: data.id, key: event.key },
@@ -1077,7 +1084,7 @@ class TreeViewControl {
 		});
 	}
 
-	fillHeaders(headers: Array<TreeHeaderJSON>, builder: any) {
+	fillHeaders(headers: Array<TreeHeaderJSON>, builder: JSBuilder) {
 		if (!headers) return;
 
 		this._thead = L.DomUtil.create(
@@ -1118,7 +1125,7 @@ class TreeViewControl {
 		}
 	}
 
-	makeEmptyList(data: TreeWidgetJSON, builder: any) {
+	makeEmptyList(data: TreeWidgetJSON, builder: JSBuilder) {
 		// contentbox and tree can never be empty, 1 page or 1 sheet always exists
 		if (data.id === 'contenttree') {
 			var tr = L.DomUtil.create(
@@ -1143,7 +1150,7 @@ class TreeViewControl {
 	fillEntries(
 		data: TreeWidgetJSON,
 		entries: Array<TreeEntryJSON>,
-		builder: any,
+		builder: JSBuilder,
 		level: number,
 		parent: HTMLElement,
 	) {
@@ -1250,7 +1257,11 @@ class TreeViewControl {
 		});
 	}
 
-	build(data: TreeWidgetJSON, builder: any, parentContainer: HTMLElement) {
+	build(
+		data: TreeWidgetJSON,
+		builder: JSBuilder,
+		parentContainer: HTMLElement,
+	) {
 		this.preprocessColumnData(data.entries);
 		this.fillHeaders(data.headers, builder);
 		this.fillEntries(data, data.entries, builder, 1, this._tbody);
@@ -1264,7 +1275,7 @@ class TreeViewControl {
 JSDialog.treeView = function (
 	parentContainer: HTMLElement,
 	data: TreeWidgetJSON,
-	builder: any,
+	builder: JSBuilder,
 ) {
 	var treeView = new TreeViewControl(data, builder);
 	treeView.build(data, builder, parentContainer);

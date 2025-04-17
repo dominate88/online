@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 
 /*
@@ -579,11 +580,6 @@ class SlideShowPresenter {
 
 		if (this._checkAlreadyPresenting()) {
 			this._notifyAlreadyPresenting();
-			return false;
-		}
-
-		if ((window as any).ThisIsTheAndroidApp) {
-			window.postMobileMessage('SLIDESHOW');
 			return false;
 		}
 

@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -34,14 +35,14 @@ type EditWidgetControl = {
 class EditWidget {
 	protected parentContainer: HTMLElement;
 	protected data: EditWidgetJSON;
-	protected builder: any;
+	protected builder: JSBuilder;
 	protected callback: JSDialogCallback;
 	protected edit: EditWidgetControl;
 
 	constructor(
 		parentContainer: HTMLElement,
 		data: EditWidgetJSON,
-		builder: any,
+		builder: JSBuilder,
 		callback: JSDialogCallback,
 	) {
 		this.parentContainer = parentContainer;
@@ -53,7 +54,7 @@ class EditWidget {
 	protected static buildImpl(
 		parentContainer: HTMLElement,
 		data: EditWidgetJSON,
-		builder: any,
+		builder: JSBuilder,
 	): EditWidgetControl {
 		const result: EditWidgetControl = { container: null, input: null };
 
@@ -136,7 +137,7 @@ class EditWidget {
 JSDialog.edit = function (
 	parentContainer: HTMLElement,
 	data: EditWidgetJSON,
-	builder: any,
+	builder: JSBuilder,
 	callback: JSDialogCallback,
 ) {
 	const widget = new EditWidget(parentContainer, data, builder, callback);

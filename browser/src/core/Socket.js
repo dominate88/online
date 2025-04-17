@@ -323,7 +323,7 @@ app.definitions.Socket = L.Class.extend({
 		if (!window.bundlejsLoaded)
 			status += '[!bundlejsLoaded]';
 
-		L.Log.log(msg, type + status);
+		app.Log.log(msg, type + status);
 
 		if (!window.protocolDebug && !debugOn)
 			return;
@@ -380,7 +380,6 @@ app.definitions.Socket = L.Class.extend({
 		var completeEventWholeFunction = this.createCompleteTraceEvent('emitSlurped-' + String(queueLength),
 									       {'_slurpQueue.length' : String(queueLength)});
 		if (this._map && this._map._docLayer) {
-			this._map._docLayer.pauseDrawing();
 			TileManager.beginTransaction();
 			this._inLayerTransaction = true;
 
@@ -465,9 +464,6 @@ app.definitions.Socket = L.Class.extend({
 
 		if (this._map) {
 			var completeCallback = () => {
-				if (this._map._docLayer)
-					this._map._docLayer.resumeDrawing(true);
-
 				// Let other layers / overlays catch up.
 				this._map.fire('messagesdone');
 
@@ -1701,7 +1697,7 @@ app.definitions.Socket = L.Class.extend({
 			if (GraphicSelection.hasActiveSelection())
 				GraphicSelection.rectangle = null;
 			if (this._map._docLayer._docType === 'presentation')
-				app.file.textCursor.visible = false;
+				app.setCursorVisibility(false);
 
 			this._map._docLayer._resetCanonicalIdStatus();
 			this._map._docLayer._resetViewId();

@@ -335,12 +335,12 @@ void AdminSocketHandler::handleMessage(const std::vector<char> &payload)
         Poco::JSON::Object::Ptr object;
         if (JsonUtil::parseJSON(tokens[1], object))
         {
-            const std::string routeToken =
+            std::string routeToken =
                 JsonUtil::getJSONValue<std::string>(object, Util::getProcessIdentifier());
             if (!routeToken.empty())
             {
                 COOLWSD::alertAllUsersInternal("updateroutetoken " + routeToken);
-                COOLWSD::RouteToken = routeToken;
+                COOLWSD::RouteToken = std::move(routeToken);
             }
             else
             {
@@ -432,8 +432,9 @@ void AdminSocketHandler::handleMessage(const std::vector<char> &payload)
 
 AdminSocketHandler::AdminSocketHandler(Admin* adminManager,
                                        const std::weak_ptr<StreamSocket>& socket,
-                                       const Poco::Net::HTTPRequest& request)
-    : WebSocketHandler(socket.lock(), request)
+                                       const Poco::Net::HTTPRequest& request,
+                                       const std::string& expectedOrigin)
+    : WebSocketHandler(socket.lock(), request, expectedOrigin)
     , _admin(adminManager)
     , _isAuthenticated(false)
 {
@@ -479,7 +480,8 @@ void AdminSocketHandler::subscribeAsync(const std::shared_ptr<AdminSocketHandler
 
 bool AdminSocketHandler::handleInitialRequest(
     const std::weak_ptr<StreamSocket> &socketWeak,
-    const Poco::Net::HTTPRequest& request)
+    const Poco::Net::HTTPRequest& request,
+    const std::string& expectedOrigin)
 {
     if (!COOLWSD::AdminEnabled)
     {
@@ -500,7 +502,8 @@ bool AdminSocketHandler::handleInitialRequest(
     if (request.has("Upgrade") && Util::iequal(request["Upgrade"], "websocket"))
     {
         Admin &admin = Admin::instance();
-        auto handler = std::make_shared<AdminSocketHandler>(&admin, socketWeak, request);
+        auto handler = std::make_shared<AdminSocketHandler>(&admin, socketWeak,
+                                                            request, expectedOrigin);
         socket->setHandler(handler);
 
         AdminSocketHandler::subscribeAsync(handler);
@@ -1218,7 +1221,7 @@ void Admin::scheduleMonitorConnect(const std::string &uri, std::chrono::steady_c
     MonitorConnectRecord todo;
     todo.setWhen(when);
     todo.setUri(uri);
-    _pendingConnects.push_back(todo);
+    _pendingConnects.push_back(std::move(todo));
 }
 
 void Admin::getMetrics(std::ostringstream &metrics)

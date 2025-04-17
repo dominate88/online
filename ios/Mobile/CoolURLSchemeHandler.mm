@@ -124,6 +124,7 @@
     std::string mediaPath = [self getDocumentBroker]->getEmbeddedMediaPath(tag);
     
     NSMutableDictionary<NSString*, NSString*> * responseHeaders = [[NSMutableDictionary alloc] init];
+    [responseHeaders setObject:@"null" forKey:@"Access-Control-Allow-Origin"]; // Yes, the origin really is 'null' for 'file:' origins
         
     if (mediaPath.empty() || !std::filesystem::exists(mediaPath)) {
         [responseHeaders setObject:@"0" forKey:@"Content-Length"];
@@ -148,7 +149,6 @@
     
     NSInteger responseStatus = 200;
     NSInteger start = 0;
-    NSInteger end = size - 1; // 'end' is considered to be *inclusive* here to match the range header
     
     bool errorResponse = false;
 
@@ -163,9 +163,10 @@
                     static_cast<long>(size)]
          forKey:@"Content-Range"];
         errorResponse = true;
-    } else {
+    } else if (rangeHeader != nil) {
         responseStatus = 206;
         NSInteger totalSize = size;
+        NSInteger end;
         std::tie(start, end, size) = rangePositionsAndSize.value();
         [responseHeaders
          setObject:[NSString

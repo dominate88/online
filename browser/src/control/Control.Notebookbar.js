@@ -72,6 +72,9 @@ L.Control.Notebookbar = L.Control.extend({
 
 		$('#toolbar-wrapper').addClass('hasnotebookbar');
 		$('.main-nav').addClass('hasnotebookbar');
+		this.floatingNavIcon = document.querySelector('.navigator-btn-wrapper');
+		if (this.floatingNavIcon) 
+			this.floatingNavIcon.classList.add('hasnotebookbar');
 		document.getElementById('document-container').classList.add('notebookbar-active');
 
 		var docLogoHeader = L.DomUtil.create('div', '');
@@ -119,6 +122,8 @@ L.Control.Notebookbar = L.Control.extend({
 		$('.main-nav #document-header').remove();
 		$('.main-nav').removeClass('hasnotebookbar');
 		$('#toolbar-wrapper').removeClass('hasnotebookbar');
+		if (this.floatingNavIcon) 
+			this.floatingNavIcon.classList.remove('hasnotebookbar');
 		$('.main-nav #document-header').remove();
 		this.clearNotebookbar();
 	},
@@ -357,10 +362,15 @@ L.Control.Notebookbar = L.Control.extend({
 
 	showNotebookbarButton: function(buttonId, show) {
 		var button = $(this.container).find('#' + buttonId);
-		if (show) {
-			button.show();
+		if (button) {
+			if (show) {
+				button.show();
+			} else {
+				button.hide();
+			}
+			return true;
 		} else {
-			button.hide();
+			return false;
 		}
 	},
 
@@ -372,11 +382,15 @@ L.Control.Notebookbar = L.Control.extend({
 			cssClass = commandId;
 		}
 		var button = $(this.container).find('div.' + cssClass);
-		if (show) {
-			button.show();
-		} else {
-			button.hide();
+		if (button) {
+			if (show) {
+				button.show();
+			} else {
+				button.hide();
+			}
+			return true;
 		}
+		return false;
 	},
 
 	setCurrentScrollPosition: function() {
@@ -393,11 +407,15 @@ L.Control.Notebookbar = L.Control.extend({
 		}
 	},
 
-	shouldIgnoreContextChange(contextes) {
-		const ignored = [['NotesPage', 'DrawPage'], ['DrawPage', 'NotesPage']];
+	shouldIgnoreContextChange(contexts, appId) {
+		// New -> old context name pairs.
+		let ignored = [['NotesPage', 'DrawPage'], ['DrawPage', 'NotesPage']];
+		if (appId === 'com.sun.star.text.TextDocument') {
+			ignored.push(['Text', '']);
+		}
 
 		for (let i = 0; i < ignored.length; i++) {
-			if (contextes[0] === ignored[i][0] && contextes[1] === ignored[i][1])
+			if (contexts[0] === ignored[i][0] && contexts[1] === ignored[i][1])
 				return true;
 		}
 
@@ -465,8 +483,13 @@ L.Control.Notebookbar = L.Control.extend({
 		var contextTab = null;
 		var defaultTab = null;
 		let alreadySelected = null;
+		// Currently selected tab name, part of the element's ID.
+		let currentlySelectedTabName = null;
 		for (var tab in tabs) {
 			var tabElement = $('#' + tabs[tab].name + '-tab-label');
+			if (tabElement.hasClass('selected')) {
+				currentlySelectedTabName = tabs[tab].name;
+			}
 			if (tabs[tab].context) {
 				tabElement.hide();
 				var contexts = tabs[tab].context.split('|');
@@ -499,21 +522,27 @@ L.Control.Notebookbar = L.Control.extend({
 		if (alreadySelected) {
 			const tabId = alreadySelected.attr('id');
 			this.updateButtonVisibilityForContext(requestedContext, tabId);
-			return tabId;
+			return;
 		}
 
 		if (contextTab) {
-			contextTab.click();
+			// Switch to the tab of the context, unless we currently show the review tab
+			// for text documents, where jumping to the next change would possibly
+			// switch to the Home or Table tabs, which is not wanted.
+			var docType = this._map.getDocType();
+			if (docType !== 'text' || currentlySelectedTabName !== 'Review') {
+				contextTab.click();
+			}
 			const tabId = contextTab.attr('id');
 			this.updateButtonVisibilityForContext(requestedContext, tabId);
-			return tabId;
+			return;
 		}
 
 		if (defaultTab) {
 			defaultTab.click();
 			const tabId = defaultTab.attr('id');
 			this.updateButtonVisibilityForContext(requestedContext, tabId);
-			return tabId;
+			return;
 		}
 	},
 
@@ -536,7 +565,7 @@ L.Control.Notebookbar = L.Control.extend({
 		if (detail.context === detail.oldContext)
 			return;
 
-		if (this.shouldIgnoreContextChange([detail.context, detail.oldContext]))
+		if (this.shouldIgnoreContextChange([detail.context, detail.oldContext], detail.appId))
 			return;
 
 		this.updateTabsVisibilityForContext(detail.context);
@@ -610,7 +639,6 @@ L.Control.Notebookbar = L.Control.extend({
 			{
 				'id': 'optionscontainer',
 				'type': 'container',
-				'vertical': 'true',
 				'children': [
 					{
 						'id': 'optionstoolboxdown',
@@ -632,14 +660,9 @@ L.Control.Notebookbar = L.Control.extend({
 				'type': 'toolitem',
 				'text': _UNO('.uno:Sidebar', '', true),
 				'command': '.uno:SidebarDeck.PropertyDeck',
-				'accessibility': { focusBack: false, combination: 'ZB', de: null }
+				'accessibility': { focusBack: false, combination: 'ZB', de: null },
+				'useInLineLabelsForUnoButtons': false,
 			},
-			{
-				'type': 'toolitem',
-				'text': _UNO('.uno:Navigator'),
-				'command': '.uno:Navigator',
-				'accessibility': { focusBack: false, combination: 'ZN', de: 'V' }
-			}
 		];
 	
 		if (this._map && this._map['wopi'].EnableShare) {

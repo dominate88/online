@@ -291,7 +291,7 @@ td.jsdialog > [id^='table-box']:not(.sidebar) {
 #toolbar-down .ui-badge,
 #toolbar-down .unolabel {
 	font-family: var(--cool-font);
-	font-size: var(--default-font-size);
+	font-size: var(--default-font-size) !important;
 	color: var(--color-status-badge) !important;
 }
 
@@ -363,6 +363,13 @@ td.jsdialog > [id^='table-box']:not(.sidebar) {
 	cursor: pointer !important;
 	background-color: var(--color-background-darker) !important;
 	color: var(--color-text-darker) !important;
+}
+
+/* Sub Tabs: example Format Cells: Font */
+
+.ui-tabs-content .ui-tabs.jsdialog.ui-widget {
+	border-block-start: 1px solid var(--color-border-lighter);
+	padding-block-start: 24px
 }
 
 /* Expander */
@@ -669,7 +676,7 @@ input[type='checkbox']:checked.autofilter, .jsdialog input[type='checkbox']:chec
 }
 
 .ui-treeview-entry:hover {
-	background-color: var(--color-background-darker);
+	background-color: var(--color-background-darker) !important;
 	color: var(--color-text-darker);
 }
 
@@ -688,24 +695,29 @@ input[type='checkbox']:checked.autofilter, .jsdialog input[type='checkbox']:chec
 
 /* tree grid */
 
-.ui-treeview div[aria-level='1'] + .ui-treeview-expanded-content {
-	margin-left: 2.5ch;
+.ui-treeview div[aria-level='1'] + .ui-treeview-expanded-content > .ui-treeview-entry {
+	padding-left: 2.5ch;
+	width: auto;
 }
 
-.ui-treeview div[aria-level='2'] + .ui-treeview-expanded-content {
-	margin-left: 3.5ch;
+.ui-treeview div[aria-level='2'] + .ui-treeview-expanded-content > .ui-treeview-entry {
+	padding-left: 3.5ch;
+	width: auto;
 }
 
-.ui-treeview div[aria-level='3'] + .ui-treeview-expanded-content {
-	margin-left: 4.5ch;
+.ui-treeview div[aria-level='3'] + .ui-treeview-expanded-content > .ui-treeview-entry {
+	padding-left: 4.5ch;
+	width: auto;
 }
 
-.ui-treeview div[aria-level='4'] + .ui-treeview-expanded-content {
-	margin-left: 5.5ch;
+.ui-treeview div[aria-level='4'] + .ui-treeview-expanded-content > .ui-treeview-entry {
+	padding-left: 5.5ch;
+	width: auto;
 }
 
-.ui-treeview div[aria-level='5'] + .ui-treeview-expanded-content {
-	margin-left: 6.5ch;
+.ui-treeview div[aria-level='5'] + .ui-treeview-expanded-content > .ui-treeview-entry {
+	padding-left: 6.5ch;
+	width: auto;
 }
 
 .ui-treeview div.ui-treeview-expander {
@@ -1492,7 +1504,7 @@ input[type='number']:hover::-webkit-outer-spin-button {
 }
 
 .jsdialog.menubutton[disabled] {
-	background-color: var(--color-background-lighter) !important;
+	background-color: transparent !important;
 	color: var(--color-text-lighter) !important;
 }
 
@@ -2024,6 +2036,11 @@ input[type='number']:hover::-webkit-outer-spin-button {
 	background-color: transparent !important;
 	border-color: transparent;
 }
+
+#toolbar-down  .jsdialog .ui-edit-container{
+	place-content: center;
+}
+
 /* Formula Wizard */
 #FormulaDialog .ui-tabs-root {
 	background-color: var(--color-background-tabs-group);
@@ -2295,6 +2312,11 @@ kbd,
 #showcomments-container[default-state='true'],
 #insertmode-container[default-state='true'],
 #permissionmode-container[default-state='true'],
+#documentstatus-container[default-state='true'],
 #statusselectionmode-container[default-state='true'] {
+	display: none !important;
+}
+
+.status-hidden {
 	display: none !important;
 }

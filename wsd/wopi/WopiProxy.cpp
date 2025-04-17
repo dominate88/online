@@ -37,7 +37,7 @@ void WopiProxy::handleRequest([[maybe_unused]] const std::shared_ptr<Terminating
 
     LOG_INF("URL [" << url << "] for WS Request.");
     const auto uriPublic = RequestDetails::sanitizeURI(url);
-    const auto docKey = RequestDetails::getDocKey(uriPublic);
+    std::string docKey = RequestDetails::getDocKey(uriPublic);
     const std::string fileId = Uri::getFilenameFromURL(docKey);
     Anonymizer::mapAnonymized(fileId,
                               fileId); // Identity mapping, since fileId is already obfuscated
@@ -71,48 +71,38 @@ void WopiProxy::handleRequest([[maybe_unused]] const std::shared_ptr<Terminating
             break;
 
         case StorageBase::StorageType::FileSystem:
+        {
             LOG_INF("URI [" << COOLWSD::anonymizeUrl(uriPublic.toString()) << "] on docKey ["
                             << docKey << "] is for a FileSystem document");
 
-            // Remove from the current poll and transfer.
-            disposition.setMove(
-                [this, docKey, url=std::move(url), uriPublic](const std::shared_ptr<Socket>& moveSocket)
-                {
-                    LOG_TRC_S('#' << moveSocket->getFD()
-                                  << ": Dissociating client socket from "
-                                     "ClientRequestDispatcher and creating DocBroker for ["
-                                  << docKey << ']');
-
-                    // Send the file contents.
-                    std::unique_ptr<std::vector<char>> data =
-                        FileUtil::readFile(uriPublic.getPath());
-                    if (data)
-                    {
-                        http::Response response(http::StatusCode::OK);
-                        response.setBody(std::string(data->data(), data->size()),
-                                         "application/octet-stream");
-                        _socket->sendAndShutdown(response);
-                    }
-                    else
-                    {
-                        HttpHelper::sendErrorAndShutdown(http::StatusCode::NotFound, _socket);
-                    }
-                });
+            // Send the file contents.
+            std::unique_ptr<std::vector<char>> data = FileUtil::readFile(uriPublic.getPath());
+            if (data)
+            {
+                http::Response response(http::StatusCode::OK);
+                response.setBody(std::string(data->data(), data->size()),
+                                 "application/octet-stream");
+                _socket->sendAndShutdown(response);
+            }
+            else
+            {
+                HttpHelper::sendErrorAndShutdown(http::StatusCode::NotFound, _socket);
+            }
             break;
+        }
 #if !MOBILEAPP
         case StorageBase::StorageType::Wopi:
             LOG_INF("URI [" << COOLWSD::anonymizeUrl(uriPublic.toString()) << "] on docKey ["
                             << docKey << "] is for a WOPI document");
             // Remove from the current poll and transfer.
-            disposition.setMove(
-                [this, &poll, docKey, url=std::move(url), uriPublic](const std::shared_ptr<Socket>& moveSocket)
+            disposition.setTransfer(*poll,
+                [this, &poll, docKey = std::move(docKey), url = std::move(url),
+                 uriPublic](const std::shared_ptr<Socket>& moveSocket)
                 {
                     LOG_TRC_S('#' << moveSocket->getFD()
                                   << ": Dissociating client socket from "
                                      "ClientRequestDispatcher and invoking CheckFileInfo for ["
                                   << docKey << ']');
-
-                    poll->insertNewSocket(moveSocket);
 
                     // CheckFileInfo and only when it's good create DocBroker.
                     checkFileInfo(poll, uriPublic, HTTP_REDIRECTION_LIMIT);
@@ -212,7 +202,7 @@ void WopiProxy::checkFileInfo(const std::shared_ptr<TerminatingPoll>& poll, cons
 void WopiProxy::download(const std::shared_ptr<TerminatingPoll>& poll, const std::string& url,
                          const Poco::URI& uriPublic, int redirectLimit)
 {
-    const std::string uriAnonym = COOLWSD::anonymizeUrl(uriPublic.toString());
+    std::string uriAnonym = COOLWSD::anonymizeUrl(uriPublic.toString());
 
     LOG_DBG("Getting info for wopi uri [" << uriAnonym << ']');
     _httpSession = StorageConnectionManager::getHttpSession(uriPublic);
@@ -225,7 +215,7 @@ void WopiProxy::download(const std::shared_ptr<TerminatingPoll>& poll, const std
                                                      << httpRequest.header());
 
     http::Session::FinishedCallback finishedCallback =
-        [this, &poll, startTime, url, uriPublic, uriAnonym,
+        [this, &poll, startTime, url, uriPublic, uriAnonym=std::move(uriAnonym),
          redirectLimit](const std::shared_ptr<http::Session>& session)
     {
         if (SigUtil::getShutdownRequestFlag())
@@ -310,7 +300,7 @@ void WopiProxy::download(const std::shared_ptr<TerminatingPoll>& poll, const std
     _httpSession->setFinishedHandler(std::move(finishedCallback));
 
     // Run the GET request on the WebServer Poll.
-    _httpSession->asyncRequest(httpRequest, *poll);
+    _httpSession->asyncRequest(httpRequest, poll);
 }
 #endif //!MOBILEAPP
 

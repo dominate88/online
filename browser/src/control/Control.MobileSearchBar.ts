@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -53,7 +54,7 @@ class MobileSearchBar extends Toolbar {
 
 	create() {
 		var items = this.getToolItems();
-		this.builder.build(this.parentContainer, items);
+		this.builder.build(this.parentContainer, items, undefined);
 	}
 }
 

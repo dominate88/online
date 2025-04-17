@@ -111,7 +111,7 @@ bool ProxyProtocolHandler::parseEmitIncoming(
     Buffer& in = socket->getInBuffer();
 
 #if 0 // protocol debugging.
-    std::stringstream oss;
+    std::ostringstream oss(Util::makeDumpStateStream());
     socket->dumpState(oss);
     LOG_TRC("Parse message:\n" << oss.str());
 #endif
@@ -182,7 +182,7 @@ void ProxyProtocolHandler::handleRequest(bool isWaiting, const std::shared_ptr<S
             LOG_WRN("proxy: unusual - incoming message with no-one to handle it");
         else if (!parseEmitIncoming(streamSocket))
         {
-            std::stringstream oss;
+            std::ostringstream oss(Util::makeDumpStateStream());
             streamSocket->dumpState(oss);
             LOG_ERR("proxy: bad socket structure " << oss.str());
         }
@@ -227,7 +227,7 @@ void ProxyProtocolHandler::handleRequest(bool isWaiting, const std::shared_ptr<S
 
 void ProxyProtocolHandler::handleIncomingMessage(SocketDisposition &disposition)
 {
-    std::stringstream oss;
+    std::ostringstream oss(Util::makeDumpStateStream());
     disposition.getSocket()->dumpState(oss);
     LOG_ERR("If you got here, it means we failed to parse this properly in handleRequest: " << oss.str());
 }
@@ -256,12 +256,14 @@ int ProxyProtocolHandler::sendMessage(const char *msg, const size_t len, bool te
 
 int ProxyProtocolHandler::sendTextMessage(const char *msg, const size_t len, bool flush) const
 {
+    ASSERT_CORRECT_THREAD();
     LOG_TRC("ProxyHack - send text msg " + std::string(msg, len));
     return const_cast<ProxyProtocolHandler *>(this)->sendMessage(msg, len, true, flush);
 }
 
 int ProxyProtocolHandler::sendBinaryMessage(const char *data, const size_t len, bool flush) const
 {
+    ASSERT_CORRECT_THREAD();
     LOG_TRC("ProxyHack - send binary msg len " << len);
     return const_cast<ProxyProtocolHandler *>(this)->sendMessage(data, len, false, flush);
 }
@@ -287,7 +289,7 @@ void ProxyProtocolHandler::dumpProxyState(std::ostream& os)
     }
     os << '\n';
     for (const auto& it : _writeQueue)
-        Util::dumpHex(os, *it, "\twrite queue entry:", "\t\t");
+        HexUtil::dumpHex(os, *it, "\twrite queue entry:", "\t\t");
     if (_msgHandler)
         _msgHandler->dumpState(os);
 }
@@ -295,6 +297,7 @@ void ProxyProtocolHandler::dumpProxyState(std::ostream& os)
 int ProxyProtocolHandler::getPollEvents(std::chrono::steady_clock::time_point /* now */,
                                         int64_t &/* timeoutMaxMs */)
 {
+    ASSERT_CORRECT_THREAD();
     int events = POLLIN;
     if (_msgHandler && _msgHandler->hasQueuedMessages())
         events |= POLLOUT;
@@ -312,6 +315,7 @@ bool ProxyProtocolHandler::slurpHasMessages(std::size_t capacity)
 
 void ProxyProtocolHandler::performWrites(std::size_t capacity)
 {
+    ASSERT_CORRECT_THREAD();
     if (!slurpHasMessages(capacity))
         return;
 

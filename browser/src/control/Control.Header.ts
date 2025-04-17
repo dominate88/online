@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -124,7 +125,7 @@ export class Header extends app.definitions.canvasSectionObject {
 	}
 
 	_isRowColumnInSelectedRange (index: number): boolean {
-		return (!!this._headerInfo.getElementData(index).isCurrent) || (!!this._headerInfo.getElementData(index).isHighlighted);
+		return (!!this._headerInfo.getElementData(index)?.isCurrent) || (!!this._headerInfo.getElementData(index)?.isHighlighted);
 	}
 
 	onContextMenu(evt: MouseEvent): void {

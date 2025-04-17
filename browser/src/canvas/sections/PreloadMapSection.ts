@@ -93,7 +93,7 @@ class PreloadMapSection extends app.definitions.canvasSectionObject {
 		partBounds[preParts].max.y += viewHeight * mainYMultiply;
 
 		var offx: number = 50;
-		var offy: number = 400;
+		var offy: number = 200;
 		var voffset: number = 0;
 		for (var p = 0; p < partBounds.length; ++p) {
 			var range = partBounds[p];
@@ -117,8 +117,21 @@ class PreloadMapSection extends app.definitions.canvasSectionObject {
 							canvas.fillStyle = 'rgba(255, 0, 0, 0.8)'; // red
 						else if (tile.needsFetch())
 							canvas.fillStyle = 'rgba(255, 255, 0, 0.8)'; // yellow
-						// present
-						else canvas.fillStyle = 'rgba(0, 255, 0, 0.5)'; // green
+						else if (!tile.image)
+							canvas.fillStyle = 'rgba(0, 96, 0, 0.8)'; // dark green
+						else if (tile.distanceFromView <= 0)
+							canvas.fillStyle = 'rgba(0, 255, 0, 0.5)'; // visible
+						else {
+							const expFactor = TileManager.getExpiryFactor(tile);
+							if (expFactor >= 0)
+								// expiry shown by more blue, and less green
+								canvas.fillStyle =
+									'rgba(0, ' +
+									Math.round(192 * (1.0 - expFactor)) +
+									', ' +
+									Math.round(96 * expFactor) +
+									', 0.8)';
+						}
 					} // outside document range
 					else canvas.fillStyle = 'rgba(0, 0, 0, 0.3)'; // dark grey
 

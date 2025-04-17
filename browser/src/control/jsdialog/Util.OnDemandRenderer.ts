@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -16,7 +17,7 @@
 declare var JSDialog: any;
 
 function onDemandRenderer(
-	builder: any,
+	builder: JSBuilder,
 	controlId: string,
 	controlType: string,
 	entryId: number,

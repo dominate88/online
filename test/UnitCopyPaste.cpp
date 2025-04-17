@@ -105,7 +105,7 @@ public:
             std::istringstream responseStream(body);
             auto clipboard = std::make_shared<ClipboardData>();
             clipboard->read(responseStream);
-            std::ostringstream oss;
+            std::ostringstream oss(Util::makeDumpStateStream());
             clipboard->dumpState(oss);
 
             LOG_TST("getClipboard: got response. State:\n" << oss.str());
@@ -138,8 +138,8 @@ public:
         {
             LOG_TST("Error: clipboard content mismatch "
                     << value.length() << " bytes vs. " << content.length() << " bytes. Clipboard:\n"
-                    << Util::dumpHex(value) << "Expected:\n"
-                    << Util::dumpHex(content));
+                    << HexUtil::dumpHex(value) << "Expected:\n"
+                    << HexUtil::dumpHex(content));
             LOK_ASSERT_EQUAL_MESSAGE("Clipboard content mismatch", content, value);
             exitTest(TestResult::Failed);
             return false;

@@ -103,7 +103,8 @@ void dump_forkit_state()
         << "  MasterLocation: " << MasterLocation
         << "\n";
 
-    oss << "\nMalloc info [" << getpid() << "]: \n" << Util::getMallocInfo() << '\n';
+    oss << "\nMalloc info [" << getpid() << "]: \n\t"
+        << Util::replace(Util::getMallocInfo(), "\n", "\n\t") << '\n';
 
     const std::string msg = oss.str();
     fprintf(stderr, "%s", msg.c_str());
@@ -156,12 +157,13 @@ protected:
             const int count = std::stoi(tokens[1]);
             if (count > 0)
             {
-                LOG_INF("Setting to spawn " << tokens[1] << " child" << (count == 1 ? "" : "ren") << " per request.");
+                LOG_INF("Setting to spawn " << count << " child" << (count == 1 ? "" : "ren")
+                                            << " per request");
                 ForkCounter = count;
             }
             else
             {
-                LOG_WRN("Cannot spawn " << tokens[1] << " children as requested.");
+                LOG_WRN("Cannot spawn [" << tokens[1] << "] children as requested");
             }
         }
         else if (tokens.size() == 2 && tokens.equals(0, "addforkit"))
@@ -547,7 +549,7 @@ static int createLibreOfficeKit(const std::string& childRoot,
                        DisplayVersion, sysTemplateIncomplete, spareKitId);
         };
 
-        auto parentFunc = [childRoot, jailId](int pid)
+        auto parentFunc = [childRoot, jailId = std::move(jailId)](int pid)
         {
             // Parent
             if (pid < 0)

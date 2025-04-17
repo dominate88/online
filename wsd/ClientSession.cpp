@@ -40,6 +40,7 @@
 #include <common/Clipboard.hpp>
 #include <common/Session.hpp>
 #include <common/TraceEvent.hpp>
+#include <common/HexUtil.hpp>
 #include <common/Util.hpp>
 #include <common/CommandControl.hpp>
 #include <wsd/TileDesc.hpp>
@@ -193,7 +194,7 @@ bool ClientSession::disconnectFromKit()
 }
 
 // Allow 20secs for the clipboard and disconnection to come.
-bool ClientSession::staleWaitDisconnect(const std::chrono::steady_clock::time_point &now)
+bool ClientSession::staleWaitDisconnect(const std::chrono::steady_clock::time_point now)
 {
     if (_state != SessionState::WAIT_DISCONNECT)
         return false;
@@ -435,8 +436,8 @@ void ClientSession::onTileProcessed(TileWireId wireId)
 namespace
 {
 std::shared_ptr<http::Session>
-makeSignatureActionSession(const std::shared_ptr<ClientSession> clientSession,
-                           const std::string& commandName, const std::string& requestUrl)
+makeSignatureActionSession(std::shared_ptr<ClientSession> clientSession,
+                           std::string commandName, const std::string& requestUrl)
 {
     // Create the session and set a finished callback
     std::shared_ptr<http::Session> httpSession = http::Session::create(requestUrl);
@@ -446,7 +447,9 @@ makeSignatureActionSession(const std::shared_ptr<ClientSession> clientSession,
         return nullptr;
     }
 
-    http::Session::FinishedCallback finishedCallback = [clientSession, commandName](const std::shared_ptr<http::Session>& session)
+    http::Session::FinishedCallback finishedCallback =
+        [clientSession = std::move(clientSession),
+         commandName = std::move(commandName)](const std::shared_ptr<http::Session>& session)
     {
         const std::shared_ptr<const http::Response> httpResponse = session->response();
         Poco::JSON::Object::Ptr resultArguments = new Poco::JSON::Object();
@@ -476,7 +479,6 @@ makeSignatureActionSession(const std::shared_ptr<ClientSession> clientSession,
 
 bool ClientSession::handleSignatureAction(const StringVector& tokens)
 {
-    const std::string commandName = tokens[1];
     // Make the HTTP session: this requires an URL
     Poco::JSON::Object::Ptr serverPrivateInfoObject = new Poco::JSON::Object();
     if (!JsonUtil::parseJSON(getServerPrivateInfo(), serverPrivateInfoObject))
@@ -486,6 +488,7 @@ bool ClientSession::handleSignatureAction(const StringVector& tokens)
     }
     std::string requestUrl;
     JsonUtil::findJSONValue(serverPrivateInfoObject, "ESignatureBaseUrl", requestUrl);
+    std::string commandName = tokens[1];
     if (commandName == ".uno:PrepareSignature")
     {
         requestUrl += "/api/signatures/prepare-files-for-signing";
@@ -494,7 +497,8 @@ bool ClientSession::handleSignatureAction(const StringVector& tokens)
     {
         requestUrl += "/api/signatures/download-signed-file";
     }
-    std::shared_ptr<http::Session> httpSession = makeSignatureActionSession(client_from_this(), commandName, requestUrl);
+    std::shared_ptr<http::Session> httpSession =
+        makeSignatureActionSession(client_from_this(), std::move(commandName), requestUrl);
     if (!httpSession)
     {
         return false;
@@ -1367,16 +1371,16 @@ bool ClientSession::_handleInput(const char *buffer, int length)
         {
             std::string json;
             getTokenString(tokens[2], "json", json);
-            updateBrowserSettingsJSON(json);
-            COOLWSD::syncUsersBrowserSettings(getUserId(), docBroker->getPid(), json);
             try
             {
+                updateBrowserSettingsJSON(json);
+                COOLWSD::syncUsersBrowserSettings(getUserId(), docBroker->getPid(), json);
                 uploadBrowserSettingsToWopiHost();
             }
             catch (const std::exception& exc)
             {
                 LOG_WRN("Failed to upload browsersetting json for session ["
-                        << getId() << ']');
+                        << getId() << "] with error[" << exc.what() << ']');
             }
         }
     }
@@ -1429,7 +1433,7 @@ void ClientSession::uploadBrowserSettingsToWopiHost()
     LOG_DBG("Uploading browsersetting json [" << jsonStream.str() << "] to wopiHost[" << uriAnonym
                                               << ']');
     httpSession->setFinishedHandler(std::move(finishedCallback));
-    httpSession->asyncRequest(httpRequest, *COOLWSD::getWebServerPoll());
+    httpSession->asyncRequest(httpRequest, COOLWSD::getWebServerPoll());
 }
 
 void ClientSession::updateBrowserSettingsJSON(const std::string& json)
@@ -1534,6 +1538,7 @@ bool ClientSession::loadDocument(const char* /*buffer*/, int /*length*/,
         overrideDocOption();
 
         std::ostringstream oss;
+        oss << std::boolalpha;
         oss << "load url=" << docBroker->getPublicUri().toString();
 
 #if ENABLE_SSL
@@ -1581,7 +1586,7 @@ bool ClientSession::loadDocument(const char* /*buffer*/, int /*length*/,
             oss << " serverprivateinfo=" << encodedServerPrivateInfo;
         }
 
-        oss << " readonly=" << isReadOnly();
+        oss << " readonly=" << (isReadOnly() ? 1 : 0);
 
         if (isAllowChangeComments())
         {
@@ -1639,7 +1644,7 @@ bool ClientSession::loadDocument(const char* /*buffer*/, int /*length*/,
 
         if (ConfigUtil::hasProperty("security.enable_macros_execution"))
         {
-            oss << " enableMacrosExecution=" << std::boolalpha
+            oss << " enableMacrosExecution="
                 << ConfigUtil::getConfigValue<bool>("security.enable_macros_execution", false);
         }
 
@@ -1656,7 +1661,7 @@ bool ClientSession::loadDocument(const char* /*buffer*/, int /*length*/,
 
         if (ConfigUtil::getConfigValue<bool>("accessibility.enable", false))
         {
-            oss << " accessibilityState=" << std::boolalpha << getAccessibilityState();
+            oss << " accessibilityState=" << getAccessibilityState();
         }
 
         if (!getDocOptions().empty())
@@ -1898,13 +1903,13 @@ void ClientSession::sendFileMode(const bool readOnly, const bool editComments)
     sendTextFrame(result);
 }
 
-void ClientSession::setLockFailed(const std::string& sReason)
+void ClientSession::setLockFailed(const std::string& reason)
 {
     // TODO: make this "read-only" a special one with a notification (infobar? balloon tip?)
     //       and a button to unlock
     _isLockFailed = true;
     setReadOnly(true);
-    sendTextFrame("lockfailed:" + sReason);
+    sendTextFrame("lockfailed:" + reason);
 }
 
 bool ClientSession::attemptLock(const std::shared_ptr<DocumentBroker>& docBroker)
@@ -1974,16 +1979,17 @@ void ClientSession::postProcessCopyPayload(const std::shared_ptr<Message>& paylo
 {
     // Insert our meta origin if we can
     payload->rewriteDataBody([this](std::vector<char>& data) {
-            if (Util::findInVector(data, "clipboardcontent: content\ntext/plain") == 0)
+            std::string_view sv(data.data(), data.size());
+            if (sv.starts_with("clipboardcontent: content\ntext/plain"))
             {
                 // Single format and it's plain text (not HTML): no need to rewrite anything.
                 return false;
             }
 
-            bool json = Util::findInVector(data, "textselectioncontent:\n{") == 0;
+            bool json = sv.starts_with("textselectioncontent:\n{");
             if (!json)
             {
-                json = Util::findInVector(data, "clipboardcontent: content\n{") == 0;
+                json = sv.starts_with("clipboardcontent: content\n{");
             }
             std::size_t pos = Util::findInVector(data, "<body");
             if (pos != std::string::npos)
@@ -2014,8 +2020,15 @@ void ClientSession::postProcessCopyPayload(const std::shared_ptr<Message>& paylo
                 return true;
             }
 
-            LOG_DBG("Missing <body> in textselectioncontent/clipboardcontent payload: "
-                    << Util::dumpHex(data));
+            if (json)
+            {
+                // The content may not be json or any textual form. For example:
+                // clipboardcontent: content.application/x-openoffice-svxb;windows_formatname="SVXB (StarView Bitmap/Animation)"
+                // Do not issue this in those cases. (We should also cap the data we dump here.)
+                LOG_DBG("Missing <body> in textselectioncontent/clipboardcontent payload:\n"
+                        << [data](auto& log) { HexUtil::dumpHex(log, data); });
+            }
+
             return false;
 
         });
@@ -2446,7 +2459,7 @@ bool ClientSession::handleKitToClientMessage(const std::shared_ptr<Message>& pay
             }
         }
 
-        if (payload->find("url", 3) >= 0)
+        if (payload->contains("url"))
         {
             std::string json(payload->data().data(), payload->size());
             const auto it = json.find('{');
@@ -2762,13 +2775,11 @@ bool ClientSession::handleKitToClientMessage(const std::shared_ptr<Message>& pay
                 LOG_ERR("Error in extractedlinktargets: not in isConvertTo mode");
             else
             {
-                const std::string stringJSON = payload->jsonString();
-
                 http::Response httpResponse(http::StatusCode::OK);
                 FileServerRequestHandler::hstsHeaders(httpResponse);
                 httpResponse.set("Last-Modified", Util::getHttpTimeNow());
                 httpResponse.set("X-Content-Type-Options", "nosniff");
-                httpResponse.setBody(stringJSON, "application/json");
+                httpResponse.setBody(payload->jsonString(), "application/json");
                 _saveAsSocket->sendAndShutdown(httpResponse);
             }
 
@@ -2783,13 +2794,11 @@ bool ClientSession::handleKitToClientMessage(const std::shared_ptr<Message>& pay
                 LOG_ERR("Error in extracteddocumentstructure: not in isConvertTo mode");
             else
             {
-                const std::string stringJSON = payload->jsonString();
-
                 http::Response httpResponse(http::StatusCode::OK);
                 FileServerRequestHandler::hstsHeaders(httpResponse);
                 httpResponse.set("Last-Modified", Util::getHttpTimeNow());
                 httpResponse.set("X-Content-Type-Options", "nosniff");
-                httpResponse.setBody(stringJSON, "application/json");
+                httpResponse.setBody(payload->jsonString(), "application/json");
                 _saveAsSocket->sendAndShutdown(httpResponse);
             }
 
@@ -2804,13 +2813,11 @@ bool ClientSession::handleKitToClientMessage(const std::shared_ptr<Message>& pay
                 LOG_ERR("Error in transformeddocumentstructure: not in isConvertTo mode");
             else
             {
-                const std::string stringJSON = payload->jsonString();
-
                 http::Response httpResponse(http::StatusCode::OK);
                 FileServerRequestHandler::hstsHeaders(httpResponse);
                 httpResponse.set("Last-Modified", Util::getHttpTimeNow());
                 httpResponse.set("X-Content-Type-Options", "nosniff");
-                httpResponse.setBody(stringJSON, "application/json");
+                httpResponse.setBody(payload->jsonString(), "application/json");
                 _saveAsSocket->sendAndShutdown(httpResponse);
             }
 
@@ -2936,7 +2943,7 @@ size_t ClientSession::getTilesOnFlyUpperLimit() const
     return tilesOnFlyUpperLimit;
 }
 
-void ClientSession::removeOutdatedTilesOnFly(const std::chrono::steady_clock::time_point &now)
+void ClientSession::removeOutdatedTilesOnFly(const std::chrono::steady_clock::time_point now)
 {
     size_t dropped = 0;
     const auto highTimeoutMs = std::chrono::milliseconds(TILE_ROUNDTRIP_TIMEOUT_MS);

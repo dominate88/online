@@ -12,16 +12,19 @@
 #include <config.h>
 
 #include "RequestDetails.hpp"
-#include "Util.hpp"
-#include "common/Log.hpp"
+
+#include <common/HexUtil.hpp>
+#include <common/Log.hpp>
+#include <common/Util.hpp>
 #if !MOBILEAPP
-#include <HostUtil.hpp>
+#include <wsd/HostUtil.hpp>
 #endif // !MOBILEAPP
+#include <wsd/Exceptions.hpp>
 
 #include <Poco/URI.h>
+
 #include <sstream>
 #include <stdexcept>
-#include "Exceptions.hpp"
 
 namespace
 {
@@ -147,7 +150,7 @@ void RequestDetails::dehexify()
         const std::string encoded =
             _uriString.substr(start, (end == std::string::npos) ? end : end - start);
         std::string decoded;
-        Util::dataFromHexString(encoded, decoded);
+        HexUtil::dataFromHexString(encoded, decoded);
         res += decoded;
 
         res += _uriString.substr(end); // Concatenate the remainder.
@@ -234,9 +237,9 @@ void RequestDetails::processURI()
     _fields[Field::WOPISrc] = getParam("WOPISrc");
 
     // &compat=
-    const std::string compat = getParam("compat");
+    std::string compat = getParam("compat");
     if (!compat.empty())
-        _fields[Field::Compat] = compat;
+        _fields[Field::Compat] = std::move(compat);
 
     // /ws[/<sessionId>/<command>/<serial>]
     if (posLastWS != std::string::npos)
@@ -296,11 +299,7 @@ std::string RequestDetails::getLineModeKey(const std::string& /*access_token*/) 
 {
     // This key is based on the WOPISrc and the access_token only.
     // However, we strip the host:port and scheme from the WOPISrc.
-    const std::string wopiSrc = Poco::URI(getField(RequestDetails::Field::WOPISrc)).getPath();
-
-    //FIXME: For now, just use the path.
-    // return wopiSrc + "?access_token=" + access_token;
-    return wopiSrc;
+    return Poco::URI(getField(RequestDetails::Field::WOPISrc)).getPath();
 }
 
 #if !defined(BUILDING_TESTS)

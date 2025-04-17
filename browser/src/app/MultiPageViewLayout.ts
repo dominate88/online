@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -174,6 +175,6 @@ class MultiPageViewLayout {
 		this.resetViewLayout();
 		app.map._docLayer._sendClientZoom();
 		const bounds = this.sendClientVisibleArea();
-		TileManager.udpateLayoutView(bounds);
+		TileManager.updateLayoutView(bounds);
 	}
 }

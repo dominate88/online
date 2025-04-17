@@ -44,7 +44,7 @@ function clickOnFirstCell(firstClick = true, dblClick = false, isA1 = true) {
 	cy.cGet('#map')
 		.then(function(items) {
 			expect(items).to.have.lengthOf(1);
-			var XPos = items[0].getBoundingClientRect().left + 10;
+			var XPos = items[0].getBoundingClientRect().left + 2;
 			var YPos = items[0].getBoundingClientRect().top + 10;
 			if (dblClick)
 				cy.cGet('body').click(XPos, YPos).dblclick(XPos, YPos);
@@ -63,6 +63,9 @@ function clickOnFirstCell(firstClick = true, dblClick = false, isA1 = true) {
 			return cy.cGet(helper.addressInputSelector)
 				.should('have.prop', 'value', 'A1');
 		});
+
+		cy.cGet(helper.addressInputSelector)
+			.should('have.prop', 'value', 'A1');
 	}
 
 	cy.log('<< clickOnFirstCell - end');
@@ -136,6 +139,24 @@ function removeTextSelection() {
 		});
 
 	cy.log('<< removeTextSelection - end');
+}
+
+// Click on rows header and select Hide rows from a context menu
+function hideSelectedRows() {
+	cy.log('>> hideSelectedRows - start');
+
+	cy.cGet('[id="test-div-row header"]')
+		.then(function(header) {
+			expect(header).to.have.lengthOf(1);
+			var rect = header[0].getBoundingClientRect();
+			var posX = (rect.right + rect.left) / 2.0;
+			var posY = (rect.top + rect.bottom) / 2.0;
+			cy.cGet('body').rightclick(posX, posY);
+			cy.cGet('body').contains('.context-menu-item', 'Hide Rows').click();
+			cy.cGet('.context-menu-list').should('not.be.visible');
+		});
+
+	cy.log('<< hideSelectedRows - end');
 }
 
 // Select the entire sheet using the "Select All" button
@@ -251,7 +272,7 @@ function selectCellsInRange(range) {
 function openAutoFilterMenu(secondColumn) {
 	cy.log('>> openAutoFilterMenu - start');
 
-	let XPos = 95;
+	let XPos = 90;
 	let YPos = 10;
 
 	if (secondColumn) {
@@ -303,3 +324,4 @@ module.exports.openAutoFilterMenu = openAutoFilterMenu;
 module.exports.assertNumberofSheets = assertNumberofSheets;
 module.exports.selectOptionFromContextMenu = selectOptionFromContextMenu;
 module.exports.selectOptionMobileWizard = selectOptionMobileWizard;
+module.exports.hideSelectedRows = hideSelectedRows;

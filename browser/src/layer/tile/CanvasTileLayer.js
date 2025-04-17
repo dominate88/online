@@ -231,27 +231,6 @@ L.TileSectionManager = L.Class.extend({
 		sourceElement.addEventListener('touchcancel', function (e) { app.sectionContainer.onTouchCancel(e); }, true);
 	},
 
-	startUpdates: function () {
-		if (this._updatesRunning === true) {
-			return false;
-		}
-
-		this._updatesRunning = true;
-		this._updateWithRAF();
-		return true;
-	},
-
-	stopUpdates: function () {
-		if (this._updatesRunning) {
-			app.util.cancelAnimFrame(this._canvasRAF);
-			this.update();
-			this._updatesRunning = false;
-			return true;
-		}
-
-		return false;
-	},
-
 	dispose: function () {
 		this.stopUpdates();
 	},
@@ -283,7 +262,6 @@ L.TileSectionManager = L.Class.extend({
 	_addSplitsSection: function () {
 		const splitSection = new app.definitions.splitSection();
 		app.sectionContainer.addSection(splitSection);
-		app.sectionContainer.reNewAllSections(true);
 	},
 
 	_removeSplitsSection: function () {
@@ -293,34 +271,31 @@ L.TileSectionManager = L.Class.extend({
 			section.sectionProperties.strokeStyle = '#c0c0c0';
 		}
 		app.sectionContainer.removeSection(L.CSections.Debug.Splits.name);
-		app.sectionContainer.reNewAllSections(true);
 	},
 
 	// Debug tool
 	_addTilePixelGridSection: function () {
 		app.sectionContainer.addSection(new app.definitions.pixelGridSection());
-		app.sectionContainer.reNewAllSections(true);
 	},
 
 	_removeTilePixelGridSection: function () {
 		app.sectionContainer.removeSection(L.CSections.Debug.TilePixelGrid.name);
-		app.sectionContainer.reNewAllSections(true);
+	},
+
+	_addDebugOverlaySection: function () {
+		app.sectionContainer.addSection(new app.definitions.debugOverlaySection(this._map._debug));
+	},
+
+	_removeDebugOverlaySection: function () {
+		app.sectionContainer.removeSection(L.CSections.Debug.DebugOverlay.name);
 	},
 
 	_addPreloadMap: function () {
 		app.sectionContainer.addSection(new app.definitions.preloadMapSection());
-		app.sectionContainer.reNewAllSections(true);
 	},
 
 	_removePreloadMap: function () {
 		app.sectionContainer.removeSection(L.CSections.Debug.PreloadMap.name);
-		app.sectionContainer.reNewAllSections(true);
-	},
-
-	_updateWithRAF: function () {
-		// update-loop with requestAnimationFrame
-		this._canvasRAF = app.util.requestAnimFrame(this._updateWithRAF, this, false /* immediate */);
-		app.sectionContainer.requestReDraw();
 	},
 
 	update: function () {
@@ -618,7 +593,7 @@ L.CanvasTileLayer = L.Layer.extend({
 		this._docType = options.docType;
 		this._documentInfo = '';
 		if (this._docType !== 'text')
-			app.file.textCursor.visible = false; // Don't change the default for Writer.
+			app.setCursorVisibility(false); // Don't change the default for Writer.
 		// Last cursor position for invalidation
 		this.lastCursorPos = null;
 		// Are we zooming currently ? - if so, no cursor.
@@ -716,12 +691,10 @@ L.CanvasTileLayer = L.Layer.extend({
 				setTimeout(this.update.bind(this), 200);
 			}, this._painter);
 		}
-		else if (this._docType !== 'spreadsheet') { // See scroll section. panBy is used for spreadsheets while scrolling.
-			this._map.on('movestart', this._painter.startUpdates, this._painter);
-			this._map.on('moveend', this._painter.stopUpdates, this._painter);
-		}
 		this._map.on('zoomend', this._painter.update, this._painter);
-		this._map.on('splitposchanged', this._painter.update, this._painter);
+		this._map.on('splitposchanged', function () {
+			TileManager.update();
+		}, this);
 		this._map.on('sheetgeometrychanged', this._painter.update, this._painter);
 		this._map.on('move', this._syncTilePanePos, this);
 
@@ -892,6 +865,7 @@ L.CanvasTileLayer = L.Layer.extend({
 
 		TileManager.update();
 		TileManager.resetPreFetching(true);
+		app.sectionContainer.requestReDraw();
 	},
 
 	_isLatLngInView: function (position) {
@@ -1693,14 +1667,10 @@ L.CanvasTileLayer = L.Layer.extend({
 
 	_onCursorVisibleMsg: function(textMsg) {
 		var command = textMsg.match('cursorvisible: true');
-		app.file.textCursor.visible = command ? true : false;
+		app.setCursorVisibility(command ? true : false);
 		this._removeSelection();
 		this._onUpdateCursor();
 		app.events.fire('TextCursorVisibility', { visible: app.file.textCursor.visible });
-	},
-
-	_setCursorVisible: function() {
-		app.file.textCursor.visible = true;
 	},
 
 	_onDownloadAsMsg: function (textMsg) {
@@ -4101,6 +4071,9 @@ L.CanvasTileLayer = L.Layer.extend({
 	// Meant for desktop case, where the ending zoom and centers are all known in advance.
 	runZoomAnimation: function (zoomEnd, pinchCenter, mapUpdater, runAtFinish) {
 
+		if (this._map.getDocType() === 'spreadsheet')
+			OtherViewCellCursorSection.closePopups();
+
 		this.preZoomAnimation(pinchCenter);
 		this.zoomStep(this._map.getZoom(), pinchCenter);
 		var thisObj = this;
@@ -4292,13 +4265,14 @@ L.CanvasTileLayer = L.Layer.extend({
 					+ ' splitx=' + Math.round(splitPos.x)
 					+ ' splity=' + Math.round(splitPos.y);
 
-		if (this._ySplitter) {
-			this._ySplitter.onPositionChange();
-		}
-		if (this._xSplitter) {
-			this._xSplitter.onPositionChange();
-		}
 		if (this._clientVisibleArea !== newClientVisibleArea || forceUpdate) {
+			// Only update on some change
+			if (this._ySplitter) {
+				this._ySplitter.onPositionChange();
+			}
+			if (this._xSplitter) {
+				this._xSplitter.onPositionChange();
+			}
 			// Visible area is dirty, update it on the server
 			app.socket.sendMessage(newClientVisibleArea);
 			if (!this._map._fatal && app.idleHandler._active && app.socket.connected())

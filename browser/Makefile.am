@@ -53,6 +53,10 @@ QUIET_CMP = $(QUIET_CMP_$(V))
 QUIET_CMP_ = $(QUIET_CMP_$(AM_DEFAULT_VERBOSITY))
 QUIET_CMP_0 = @echo "  CMP     " $@;
 
+QUIET_JSCPCD = $(QUIET_JSCPCD_$(V))
+QUIET_JSCPCD_ = $(QUIET_JSCPCD_$(AM_DEFAULT_VERBOSITY))
+QUIET_JSCPCD_0 = @echo "  JSCPCD  " $@;
+
 MOCHA_DIR = $(srcdir)/mocha_tests
 MOCHA_JS_DIR = $(MOCHA_DIR)/workdir
 MOCHA_TS_FILES = $(wildcard $(MOCHA_DIR)/*.ts)
@@ -122,6 +126,7 @@ endef
 COOL_ADMIN_TS = \
 	admin/src/ModalDialogCreator.ts \
 	admin/src/integrator/WordBook.ts \
+	admin/src/integrator/Xcu.ts \
 	admin/src/integrator/AdminIntegratorSettings.ts
 
 COOL_ADMIN_TS_JS = $(patsubst %.ts,$(TYPESCRIPT_JS_DIR)/%.js,$(COOL_ADMIN_TS))
@@ -234,6 +239,8 @@ COOL_LIBS_JS_DST = $(patsubst %.js,$(DIST_FOLDER)/%.js,$(COOL_LIBS_JS))
 # in a rather precise order.
 COOL_JS_LST =\
 	src/app/DocUtil.ts \
+	src/app/LocaleService.ts \
+	src/app/LayoutingService.ts \
 	src/docstate.js \
 	src/docstatefunctions.js \
 	src/docdispatcher.ts \
@@ -248,16 +255,19 @@ COOL_JS_LST =\
 	src/app/Rectangle.ts \
 	src/app/Util.ts \
 	src/app/LOUtil.ts \
+	src/app/iface/DocLayer.Interface.ts \
+	src/app/iface/Map.Interface.ts \
+	src/app/iface/Control.Interface.ts \
+	src/app/Log.ts \
+	src/app/Debug.ts \
 	src/Leaflet.js \
 	src/errormessages.js \
 	src/unocommands.js \
 	src/UNO/Key.js \
-	src/core/Log.js \
 	src/core/Util.js \
 	src/core/Class.js \
 	src/core/Events.js \
 	src/core/Socket.js \
-	src/core/Debug.js \
 	src/geometry/Point.ts \
 	src/geometry/Bounds.ts \
 	src/geometry/Transformation.ts \
@@ -283,6 +293,7 @@ COOL_JS_LST =\
 	src/canvas/sections/CalcGridSection.ts \
 	src/canvas/sections/SplitSection.ts \
 	src/canvas/sections/PixelGridSection.ts \
+	src/canvas/sections/DebugOverlaySection.ts \
 	src/canvas/sections/PreloadMapSection.ts \
 	src/canvas/sections/TilesSection.ts \
 	src/canvas/sections/AutoFillMarkerSection.ts \
@@ -385,7 +396,7 @@ COOL_JS_LST =\
 	src/control/Control.DocumentRepair.js \
 	src/control/Control.DownloadProgress.js \
 	src/control/Control.ContextMenu.js \
-	src/control/Control.Menubar.js \
+	src/control/Control.Menubar.ts \
 	src/control/Control.Tabs.js \
 	src/control/Control.Permission.js \
 	src/control/Control.Selection.js \
@@ -438,7 +449,6 @@ COOL_JS_LST =\
 	src/control/Control.MobileWizardWindow.js \
 	src/control/Control.MobileWizard.js \
 	src/control/Control.LanguageDialog.js \
-	src/control/Control.Attribution.js \
 	src/control/Control.MobileSlide.js \
 	src/control/Control.StatusBar.js \
 	src/control/Control.MobileSearchBar.ts \
@@ -450,7 +460,7 @@ COOL_JS_LST =\
 	src/control/Control.PresentationBar.js \
 	src/control/Control.TopToolbar.js \
 	src/control/Control.SaveState.ts \
-	src/control/Control.UIManager.js \
+	src/control/Control.UIManager.ts \
 	src/control/Control.DocumentNameInput.js \
 	src/control/Control.Notebookbar.js \
 	src/control/Control.NotebookbarWriter.js \
@@ -459,7 +469,9 @@ COOL_JS_LST =\
 	src/control/Control.NotebookbarDraw.js \
 	src/control/Control.NotebookbarBuilder.js \
 	src/control/Control.Layers.js \
+	src/control/Control.SidebarBase.ts \
 	src/control/Control.Sidebar.ts \
+	src/control/Control.NavigatorPanel.ts \
 	src/control/AutoCompletePopup.ts \
 	src/control/Control.Mention.ts \
 	src/control/Control.FormulaUsagePopup.ts \
@@ -493,7 +505,6 @@ COOL_JS_LST =\
 	src/slideshow/CanvasLoader.ts \
 	src/slideshow/Operation.ts \
 	src/slideshow/Primitive.ts \
-	src/slideshow/types.ts \
 	src/slideshow/engine/ActivityFactory.ts \
     src/slideshow/engine/ActivityQueue.ts \
     src/slideshow/engine/AnimationFactory.ts \
@@ -612,9 +623,9 @@ SPACE := $(EMPTY) $(EMPTY)
 COOL_VERSION = $(shell cd $(srcdir) && git log -1 --format=%h --abbrev=10)
 INTERMEDIATE_DIR ?= $(if $(IS_SEPARATE),$(abs_builddir)/debug,$(abs_builddir)/release)
 
-EXTRA_DIST = $(shell find . -type f -not -path './.git/*' -not -path './node_modules/*' -not -path './l10n/*' | sed 's/.\///')
+EXTRA_DIST = $(shell find . -type f -not -path './.git/*' -not -path './node_modules/*' -not -path './l10n/*' -not -path './images/*' | sed 's/.\///')
 
-SUBDIRS = . l10n
+SUBDIRS = . l10n images
 
 COOL_JS_BUNDLE = $(patsubst %.ts,%.js,$(COOL_JS_WEBORDER))
 
@@ -870,6 +881,7 @@ endif
 
 tscompile.done: $(COOL_JS_SRC) $(COOL_TS_SRC)
 	$(QUIET_TSC) $(builddir)/node_modules/typescript/bin/tsc --typeRoots $(builddir)/node_modules/@types --outDir $(DIST_FOLDER)/src --rootDir $(srcdir)/src --checkJs false --project $(srcdir)/tsconfig.json $(SourceMap)
+	$(QUIET_TSC) $(builddir)/node_modules/.bin/tsc-strict --typeRoots $(builddir)/node_modules/@types --outDir $(DIST_FOLDER)/src --rootDir $(srcdir)/src --checkJs false --project $(srcdir)/tsconfig.json $(SourceMap)
 	@touch $@
 
 $(COOL_TS_JS_DST): tscompile.done
@@ -961,8 +973,8 @@ pot:
 		admin/src/AdminSocketSettings.js \
 		admin/src/Util.js \
 		js/global.js \
+		src/app/Debug.ts \
 		src/canvas/sections/CommentListSection.ts \
-		src/canvas/sections/CommentMarkerSubSection.ts \
 		src/canvas/sections/CommentSection.ts \
 		src/canvas/sections/ShapeHandlesSection.ts \
 		src/canvas/sections/URLPopUpSection.ts \
@@ -982,11 +994,13 @@ pot:
 		src/control/Control.JSDialog.js \
 		src/control/Control.JSDialogBuilder.js \
 		src/control/Control.LanguageDialog.js \
-		src/control/Control.Menubar.js \
+		src/control/Control.Mention.ts \
+		src/control/Control.Menubar.ts \
 		src/control/Control.MobileBottomBar.js \
 		src/control/Control.MobileSearchBar.ts \
 		src/control/Control.MobileTopBar.ts \
 		src/control/Control.MobileWizardBuilder.js \
+		src/control/Control.NavigatorPanel.ts \
 		src/control/Control.Notebookbar.js \
 		src/control/Control.NotebookbarBuilder.js \
 		src/control/Control.NotebookbarCalc.js \
@@ -1003,23 +1017,21 @@ pot:
 		src/control/Control.Tabs.js \
 		src/control/Control.Toolbar.js \
 		src/control/Control.TopToolbar.js \
-		src/control/Control.UIManager.js \
+		src/control/Control.UIManager.ts \
 		src/control/Control.UserList.ts \
 		src/control/Control.Zotero.js \
+		src/control/HRuler.ts \
 		src/control/Parts.js \
 		src/control/Permission.js \
 		src/control/Signing.js \
 		src/control/Toolbar.js \
-		src/control/Ruler.ts \
 		src/control/VRuler.ts \
-		src/control/HRuler.ts \
 		src/control/jsdialog/Definitions.Menu.ts \
 		src/control/jsdialog/Util.SnackbarController.ts \
 		src/control/jsdialog/Widget.ColorPicker.ts \
 		src/control/jsdialog/Widget.HTMLContent.ts \
 		src/control/jsdialog/Widget.MobileBorderSelector.js \
 		src/control/jsdialog/Widget.SidebarContainers.ts \
-		src/core/Debug.js \
 		src/core/Socket.js \
 		src/docdispatcher.ts \
 		src/docstate.js \
@@ -1112,9 +1124,8 @@ check-local: $(MOCHA_TS_JS_FILES)
 		exit 1; \
 	fi
 
-	@echo "Checking code duplication..."
 	@echo > ${DUPLICATION_TEST_LOG}
-	@if npm run duplication 2> ${DUPLICATION_TEST_LOG} 1>&2; then \
+	$(QUIET_JSCPCD) if npm run duplication 2> ${DUPLICATION_TEST_LOG} 1>&2; then \
 		echo "Code duplication tests finished successfully."; \
 	else \
 		cat ${DUPLICATION_TEST_LOG}; \

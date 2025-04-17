@@ -744,7 +744,7 @@ public:
 
 #ifdef DEBUG_HTTP
         LOG_TRC("Request::writeData: " << buffered_size << " bytes buffered\n"
-                                       << Util::dumpHex(out));
+                                       << HexUtil::dumpHex(out));
 #endif //DEBUG_HTTP
 
         return true;
@@ -1069,8 +1069,8 @@ public:
 
         std::string childIndent = indent + '\t';
         Util::joinPair(os, _header, childIndent);
-        os << indent
-           << Util::dumpHex(_body, "\tbody:\n", Util::replace(childIndent, "\n", "").c_str());
+        os << indent;
+        HexUtil::dumpHex(os, _body, "\tbody:\n", Util::replace(std::move(childIndent), "\n", "").c_str());
     }
 
 private:
@@ -1269,9 +1269,9 @@ public:
     const std::shared_ptr<const Response> syncDownload(const Request& req,
                                                        const std::string& saveToFilePath)
     {
-        TerminatingPoll poller("HttpSynReqPoll");
-        poller.runOnClientThread();
-        return syncDownload(req, saveToFilePath, poller);
+        std::shared_ptr<TerminatingPoll> poller(std::make_shared<TerminatingPoll>("HttpSynReqPoll"));
+        poller->runOnClientThread();
+        return syncDownload(req, saveToFilePath, *poller);
     }
 
     /// Make a synchronous request.
@@ -1290,9 +1290,9 @@ public:
     /// The payload body of the response, if any, can be read via getBody().
     const std::shared_ptr<const Response> syncRequest(const Request& req)
     {
-        TerminatingPoll poller("HttpSynReqPoll");
-        poller.runOnClientThread();
-        return syncRequest(req, poller);
+        std::shared_ptr<TerminatingPoll> poller(std::make_shared<TerminatingPoll>("HttpSynReqPoll"));
+        poller->runOnClientThread();
+        return syncRequest(req, *poller);
     }
 
     /// Make a synchronous request with the given timeout.
@@ -1318,7 +1318,7 @@ public:
     /// Note: when reusing this Session, it is assumed that the socket
     /// is already added to the SocketPoll on a previous call (do not
     /// use multiple SocketPoll instances on the same Session).
-    void asyncRequest(const Request& req, SocketPoll& poll)
+    void asyncRequest(const Request& req, const std::weak_ptr<SocketPoll>& poll)
     {
         LOG_TRC("new asyncRequest: " << req.getVerb() << ' ' << host() << ':' << port() << ' '
                                      << req.getUrl());
@@ -1334,7 +1334,11 @@ public:
             // Technically, there is a race here. The socket can
             // get disconnected and removed right after isConnected.
             // In that case, we will timeout and no request will be sent.
-            poll.wakeup();
+            std::shared_ptr<SocketPoll> socketPoll(poll.lock());
+            if (socketPoll)
+                socketPoll->wakeup();
+            else
+                LOG_ERR("Failed to acquire SocketPoll");
         }
 
         LOG_DBG("starting asyncRequest: " << req.getVerb() << ' ' << host() << ':' << port() << ' '
@@ -1388,16 +1392,6 @@ public:
         return std::string();
     }
 
-    void disconnect()
-    {
-        LOG_TRC("disconnect");
-        std::shared_ptr<StreamSocket> socket = _socket.lock();
-        if (socket)
-        {
-            socket->shutdownConnection();
-        }
-    }
-
     net::AsyncConnectResult connectionResult()
     {
         return _result;
@@ -1411,7 +1405,7 @@ public:
         const auto now = std::chrono::steady_clock::now();
         os << indent << "http::Session: #" << _fd << " (" << (_socket.lock() ? "have" : "no")
            << " socket)";
-        os << indent << "\tconnected: " << std::boolalpha << _connected;
+        os << indent << "\tconnected: " << _connected;
         os << indent << "\ttimeout: " << _timeout;
         os << indent << "\thost: " << _host;
         os << indent << "\tport: " << _port;
@@ -1545,6 +1539,8 @@ private:
 
     void onConnect(const std::shared_ptr<StreamSocket>& socket) override
     {
+        ASSERT_CORRECT_THREAD();
+
         if (socket)
         {
             _fd = socket->getFD();
@@ -1582,6 +1578,7 @@ private:
     int getPollEvents(std::chrono::steady_clock::time_point /*now*/,
                       int64_t& /*timeoutMaxMicroS*/) override
     {
+        ASSERT_CORRECT_THREAD();
         int events = POLLIN;
         if (_request.stage() != Request::Stage::Finished)
             events |= POLLOUT;
@@ -1591,6 +1588,7 @@ private:
     void handleIncomingMessage(SocketDisposition& disposition) override
     {
         LOG_TRC("handleIncomingMessage");
+        ASSERT_CORRECT_THREAD();
         std::shared_ptr<StreamSocket> socket = _socket.lock();
         if (isConnected() && socket)
         {
@@ -1603,7 +1601,8 @@ private:
             }
 
             LOG_TRC("HandleIncomingMessage: buffer has:\n"
-                    << Util::dumpHex(std::string(data.data(), std::min<size_t>(data.size(), 256UL))));
+                    << HexUtil::dumpHex(
+                           std::string(data.data(), std::min<size_t>(data.size(), 256UL))));
 
             const int64_t read = _response->readData(data.data(), data.size());
             if (read >= 0)
@@ -1628,6 +1627,7 @@ private:
 
     void performWrites(std::size_t capacity) override
     {
+        ASSERT_CORRECT_THREAD();
         // We may get called after disconnecting and freeing the Socket instance.
         std::shared_ptr<StreamSocket> socket = _socket.lock();
         if (socket)
@@ -1676,6 +1676,7 @@ private:
     // result while it is still available
     void onHandshakeFail() override
     {
+        ASSERT_CORRECT_THREAD();
         std::shared_ptr<StreamSocket> socket = _socket.lock();
         if (socket)
         {
@@ -1689,6 +1690,7 @@ private:
 
     void onDisconnect() override
     {
+        ASSERT_CORRECT_THREAD();
         // Make sure the socket is disconnected and released.
         std::shared_ptr<StreamSocket> socket = _socket.lock();
         if (socket)
@@ -1708,6 +1710,7 @@ private:
 
     std::shared_ptr<StreamSocket> connect()
     {
+        ASSERT_CORRECT_THREAD();
         _socket.reset(); // Reset to make sure we are disconnected.
         std::shared_ptr<StreamSocket> socket =
             net::connect(_host, _port, isSecure(), shared_from_this());
@@ -1720,38 +1723,61 @@ private:
         return socket; // Return the shared pointer.
     }
 
-    void asyncConnectCompleted(SocketPoll& poll, const std::shared_ptr<StreamSocket> &socket, net::AsyncConnectResult result)
+    void asyncConnectFailed(net::AsyncConnectResult result)
     {
-        assert((!socket || _fd == socket->getFD()) &&
-               "The socket FD must have been set in onConnect");
-
-        // When used with proxy.php we may indeed get nullptr here.
-        // assert(socket && "Unexpected nullptr returned from net::connect");
-        _socket = socket; // Hold a weak pointer to it.
+        assert(!_socket.use_count());
         _result = result;
 
-        if (!socket)
-        {
-            LOG_ERR("Failed to connect to " << _host << ':' << _port);
-            callOnConnectFail();
-            return;
-        }
+        LOG_ERR("Failed to connect to " << _host << ':' << _port);
+        callOnConnectFail();
+    }
+
+    void asyncConnectSuccess(const std::shared_ptr<StreamSocket> &socket, net::AsyncConnectResult result)
+    {
+        ASSERT_CORRECT_THREAD();
+        assert(socket && _fd == socket->getFD() && "The socket FD must have been set in onConnect");
+
+        _socket = socket; // Hold a weak pointer to it.
+        _result = result;
 
         LOG_ASSERT_MSG(_socket.lock(), "Connect must set the _socket member.");
         LOG_ASSERT_MSG(_socket.lock()->getFD() == socket->getFD(),
                        "Socket FD's mismatch after connect().");
-        LOG_TRC("Inserting in poller after connecting");
-        poll.insertNewSocket(socket);
     }
 
-    void asyncConnect(SocketPoll& poll)
+    void asyncConnect(const std::weak_ptr<SocketPoll>& poll)
     {
+        ASSERT_CORRECT_THREAD();
         _socket.reset(); // Reset to make sure we are disconnected.
 
-        auto pushConnectCompleteToPoll = [this, &poll](std::shared_ptr<StreamSocket> socket, net::AsyncConnectResult result ) {
-            poll.addCallback([selfLifecycle = shared_from_this(), this, &poll, socket=std::move(socket), result]() {
-                asyncConnectCompleted(poll, socket, result);
-            });
+        auto pushConnectCompleteToPoll =
+            [this, poll](std::shared_ptr<StreamSocket> socket, net::AsyncConnectResult result)
+        {
+            std::shared_ptr<SocketPoll> socketPoll(poll.lock());
+            if (!socketPoll || !socketPoll->isAlive())
+            {
+                LOG_WRN("asyncConnect completed after poll " << (!socketPoll ? "destroyed" : "finished"));
+                return;
+            }
+
+            if (!socket)
+            {
+                // When used with proxy.php we may indeed get nullptr here.
+                socketPoll->addCallback([selfLifecycle = shared_from_this(), this, result]()
+                                        { asyncConnectFailed(result); });
+                return;
+            }
+
+            SocketDisposition disposition(socket);
+            disposition.setTransfer(*socketPoll,
+                                    [selfLifecycle = shared_from_this(), this,
+                                     socket = std::move(socket),
+                                     result]([[maybe_unused]] const std::shared_ptr<Socket>& moveSocket)
+                                    {
+                                        assert(socket == moveSocket);
+                                        asyncConnectSuccess(socket, result);
+                                    });
+            disposition.execute();
         };
 
         net::asyncConnect(_host, _port, isSecure(), shared_from_this(), pushConnectCompleteToPoll);
@@ -1759,6 +1785,7 @@ private:
 
     bool checkTimeout(std::chrono::steady_clock::time_point now) override
     {
+        ASSERT_CORRECT_THREAD();
         if (!_response || _response->done())
             return false;
 
@@ -1799,11 +1826,13 @@ private:
     std::chrono::steady_clock::time_point _startTime;
     bool _connected;
     Request _request;
+    net::AsyncConnectResult _result; // last connection tentative result
     FinishedCallback _onFinished;
     ConnectFailCallback _onConnectFail;
     std::shared_ptr<Response> _response;
-    std::weak_ptr<StreamSocket> _socket; ///< Must be the last member.
-    net::AsyncConnectResult _result; // last connection tentative result
+    /// Keep _socket as last member so it is destructed first, ensuring that
+    /// the peer members it depends on are not destructed before it
+    std::weak_ptr<StreamSocket> _socket;
 };
 
 /// HTTP Get a URL synchronously.
@@ -1823,15 +1852,12 @@ get(const std::string& url, const std::string& path,
     return httpSession->syncRequest(http::Request(path), timeout);
 }
 
-namespace server
-{
-
 /// A server http Session to make asynchronous HTTP responses.
-class Session final : public ProtocolHandlerInterface
+class ServerSession final : public ProtocolHandlerInterface
 {
 public:
-    /// Construct a Session instance.
-    Session()
+    /// Construct a ServerSession instance.
+    ServerSession()
         : _timeout(getDefaultTimeout())
         , _pos(-1)
         , _size(0)
@@ -1858,7 +1884,7 @@ public:
     std::chrono::microseconds getTimeout() const { return _timeout; }
 
     /// The onFinished callback handler signature.
-    using FinishedCallback = std::function<void(const std::shared_ptr<Session>& session)>;
+    using FinishedCallback = std::function<void(const std::shared_ptr<ServerSession>& session)>;
 
     /// Set a callback to handle onFinished events from this session.
     /// onFinished is triggered whenever a request has finished,
@@ -1867,9 +1893,9 @@ public:
 
     /// Start an asynchronous upload from a file.
     /// Return true when it dispatches the socket to the SocketPoll.
-    /// Note: when reusing this Session, it is assumed that the socket
+    /// Note: when reusing this ServerSession, it is assumed that the socket
     /// is already added to the SocketPoll on a previous call (do not
-    /// use multiple SocketPoll instances on the same Session).
+    /// use multiple SocketPoll instances on the same ServerSession).
     bool asyncUpload(std::string fromFile, std::string mimeType, int start, int end, bool startIsSuffix, http::StatusCode statusCode = http::StatusCode::OK)
     {
         _start = start;
@@ -1998,21 +2024,12 @@ public:
         }
     }
 
-    void disconnect()
-    {
-        LOG_TRC("disconnect");
-        if (_socket)
-        {
-            _socket->shutdownConnection();
-        }
-    }
-
     void dumpState(std::ostream& os, const std::string& indent) const override
     {
         const auto now = std::chrono::steady_clock::now();
-        os << indent << "http::server::Session: #" << _fd << " (" << (_socket ? "have" : "no")
+        os << indent << "http::ServerSession: #" << _fd << " (" << (_socket ? "have" : "no")
            << " socket)";
-        os << indent << "\tconnected: " << std::boolalpha << _connected;
+        os << indent << "\tconnected: " << _connected;
         os << indent << "\tstartTime: " << Util::getTimeForLog(now, _startTime);
         os << indent << "\tmimeType: " << _mimeType;
         os << indent << "\tstatusCode: " << getReasonPhraseForCode(_statusCode);
@@ -2021,8 +2038,8 @@ public:
         os << indent << "\tstart: " << _start;
         os << indent << "\tend: " << _end;
         os << indent << "\tstartIsSuffix: " << _startIsSuffix;
-        os << indent
-           << Util::dumpHex(_data, "\tdata:\n", Util::replace(indent + '\t', "\n", "").c_str());
+        os << indent;
+        HexUtil::dumpHex(os, _data, "\tdata:\n", Util::replace(indent + '\t', "\n", "").c_str());
         os << '\n';
 
         // We are typically called from the StreamSocket, so don't
@@ -2032,6 +2049,7 @@ public:
 private:
     void onConnect(const std::shared_ptr<StreamSocket>& socket) override
     {
+        ASSERT_CORRECT_THREAD();
         _connected = false; // Assume disconnected by default.
         _socket = socket;
         if (socket)
@@ -2085,6 +2103,7 @@ private:
     int getPollEvents(std::chrono::steady_clock::time_point /*now*/,
                       int64_t& /*timeoutMaxMicroS*/) override
     {
+        ASSERT_CORRECT_THREAD();
         int events = POLLIN;
         if (_fd >= 0 || _pos >= 0)
             events |= POLLOUT;
@@ -2093,6 +2112,7 @@ private:
 
     void handleIncomingMessage(SocketDisposition& /*disposition*/) override
     {
+        ASSERT_CORRECT_THREAD();
         if (!isConnected())
         {
             LOG_ERR("handleIncomingMessage called when not connected.");
@@ -2106,6 +2126,7 @@ private:
 
     void performWrites(std::size_t capacity) override
     {
+        ASSERT_CORRECT_THREAD();
         // We may get called after disconnecting and freeing the Socket instance.
         if (_socket)
         {
@@ -2149,6 +2170,7 @@ private:
 
     void onDisconnect() override
     {
+        ASSERT_CORRECT_THREAD();
         // Make sure the socket is disconnected and released.
         if (_socket)
         {
@@ -2186,9 +2208,10 @@ private:
                          //  e.g. if this is true and start is 5, we will send the last 5 bytes
     http::StatusCode _statusCode;
     FinishedCallback _onFinished;
-    std::shared_ptr<StreamSocket> _socket; ///< Must be the last member.
+    /// Keep _socket as last member so it is destructed first, ensuring that
+    /// the peer members it depends on are not destructed before it
+    std::shared_ptr<StreamSocket> _socket;
 };
-}
 
 inline std::ostream& operator<<(std::ostream& os, const http::Header& header)
 {

@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -252,7 +253,7 @@ var getElementsFromId = function (
 function htmlContent(
 	parentContainer: Element,
 	data: HtmlContentJson,
-	builder: any,
+	builder: JSBuilder,
 ) {
 	parentContainer.replaceChildren();
 

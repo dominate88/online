@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 
 /*
@@ -14,7 +15,6 @@
  * LayersCompositor generates slide from layers
  */
 
-declare var app: any;
 declare var SlideShow: any;
 
 class LayersCompositor extends SlideCompositor {

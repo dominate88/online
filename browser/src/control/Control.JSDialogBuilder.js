@@ -174,29 +174,9 @@ L.Control.JSDialogBuilder = L.Control.extend({
 
 		this._currentDepth = 0;
 
-		if (typeof Intl !== 'undefined') {
-		    var formatter, lang;
-		    try {
-			if (app.UI.language.fromURL && app.UI.language.fromURL !== '')
-			    formatter = new Intl.NumberFormat(app.UI.language.fromURL);
-			else
-			    formatter = new Intl.NumberFormat(L.Browser.lang);
-
-			var that = this;
-			formatter.formatToParts(-11.1).map(function (item) {
-			     switch (item.type) {
-			     case 'decimal':
-				 that._decimal = item.value;
-				 break;
-			     case 'minusSign':
-				 that._minusSign = item.value;
-				 break;
-			    }
-			});
-		    } catch(e) {
-			    window.app.console.log('Exception parsing lang ' + lang + ' ' + e);
-		    }
-		}
+		app.localeService.initializeNumberFormatting();
+		this._decimal = app.localeService.getDecimalSeparator();
+		this._minusSign = app.localeService.getMinusSign();
 	},
 
 	reportValidity: function() {
@@ -377,10 +357,14 @@ L.Control.JSDialogBuilder = L.Control.extend({
 			$(spinfield).attr('step', step);
 		}
 
-		if (data.enabled === false) {
+		const isDisabled = data.enabled === false;
+
+		if (isDisabled) {
 			div.disabled = true;
 			spinfield.setAttribute('disabled', 'true');
 		}
+
+		spinfield.setAttribute('aria-disabled', isDisabled);
 
 		JSDialog.SynchronizeDisabledState(div, [spinfield]);
 
@@ -391,9 +375,9 @@ L.Control.JSDialogBuilder = L.Control.extend({
 			$(spinfield).hide();
 
 		spinfield.addEventListener('change', function() {
-			var isDisabled = div.hasAttribute('disabled');
+			const isCurrentlyDisabled = div.hasAttribute('disabled');
 			var isValid = this.checkValidity();
-			if (!isDisabled && isValid) {
+			if (!isCurrentlyDisabled && isValid) {
 				if (customCallback)
 					customCallback('spinfield', 'change', div, this.value, builder);
 				else
@@ -730,9 +714,6 @@ L.Control.JSDialogBuilder = L.Control.extend({
 					L.DomUtil.addClass(label, 'hidden');
 				builder.postProcess(expander, data.children[0]);
 
-				if (data.children.length > 1 && expanded)
-					$(label).addClass('expanded');
-
 				var toggleFunction = function () {
 					if (customCallback)
 						customCallback();
@@ -740,6 +721,10 @@ L.Control.JSDialogBuilder = L.Control.extend({
 						builder.callback('expander', 'toggle', data, null, builder);
 					$(label).toggleClass('expanded');
 					$(expander).siblings().toggleClass('expanded');
+
+					// Toggle aria-expanded attribute
+					const currentState = expander.getAttribute('aria-expanded') === 'true';
+					expander.setAttribute('aria-expanded', (!currentState).toString());
 				};
 
 				$(expander).click(toggleFunction);
@@ -752,9 +737,17 @@ L.Control.JSDialogBuilder = L.Control.extend({
 			}
 
 			var expanderChildren = L.DomUtil.create('div', 'ui-expander-content ' + builder.options.cssClass, container);
-
-			if (expanded)
-				$(expanderChildren).addClass('expanded');
+		
+			if (expanded) {
+				if (data.children.length > 1) {
+					label.classList.add('expanded');
+					expander.setAttribute('aria-expanded', 'true');
+				}
+				expanderChildren.classList.add('expanded');
+			}
+			else {
+				expander.setAttribute('aria-expanded', 'false');
+			}
 
 			var children = [];
 			var startPos = 1;
@@ -1277,14 +1270,17 @@ L.Control.JSDialogBuilder = L.Control.extend({
 		};
 
 		$(radiobuttonLabel).click(() => {
-			if ($(radiobutton).prop('disabled')) return;
+			if (radiobutton.hasAttribute('disabled')) return;
 
 			$(radiobutton).prop('checked', true);
 			toggleFunction.bind({checked: true})();
 		});
 
-		if (data.enabled === 'false' || data.enabled === false)
-			$(radiobutton).attr('disabled', 'disabled');
+		const isDisabled = data.enabled === false;
+		if (isDisabled) {
+			radiobutton.setAttribute('disabled', 'disabled');
+			radiobutton.setAttribute('aria-disabled', isDisabled);
+		}
 
 		if (data.checked === 'true' || data.checked === true)
 			$(radiobutton).prop('checked', true);
@@ -1324,9 +1320,11 @@ L.Control.JSDialogBuilder = L.Control.extend({
 			}
 		});
 
-		if (data.enabled === false) {
+		const isDisabled = data.enabled === false;
+		if (isDisabled) {
 			div.disabled = true;
 			checkbox.disabled = true;
+			checkbox.setAttribute('aria-disabled', true);
 		}
 
 		JSDialog.SynchronizeDisabledState(div, [checkbox]);
@@ -1550,8 +1548,11 @@ L.Control.JSDialogBuilder = L.Control.extend({
 		if (image)
 			image.alt = '';
 
-		if (data.enabled === 'false' || data.enabled === false)
-			$(pushbutton).prop('disabled', true);
+		const isDisabled = data.enabled === false;
+		if (isDisabled) {
+			pushbutton.setAttribute('disabled', 'disabled');
+			pushbutton.setAttribute('aria-disabled', true);
+		}
 
 		if (customCallback)
 			pushbutton.onclick = customCallback;
@@ -2094,11 +2095,10 @@ L.Control.JSDialogBuilder = L.Control.extend({
 
 			controls['button'] = button;
 			if (builder.options.noLabelsForUnoButtons !== true) {
-				var label = L.DomUtil.create('label', 'ui-content unolabel', button);
-				label.htmlFor = buttonId;
-				label.textContent = builder._cleanText(data.text);
-				builder._stressAccessKey(label, button.accessKey);
-				controls['label'] = label;
+				var span = L.DomUtil.create('span', 'ui-content unolabel', button);
+				span.textContent = builder._cleanText(data.text);
+				builder._stressAccessKey(span, button.accessKey);
+				controls['label'] = span;
 				$(div).addClass('has-label');
 			} else if (builder.options.useInLineLabelsForUnoButtons === true) {
 				$(div).addClass('no-label');
@@ -2118,17 +2118,17 @@ L.Control.JSDialogBuilder = L.Control.extend({
 				}
 			}
 
-			div.setAttribute('data-cooltip', builder._cleanText(data.text));
+			const tooltip = builder._cleanText(data.tooltip) || builder._cleanText(data.text);
+			div.setAttribute('data-cooltip', tooltip);
 
 			if (builder.options.useInLineLabelsForUnoButtons === true) {
 				$(div).addClass('inline');
-				label = L.DomUtil.create('span', 'ui-content unolabel', div);
-				label.htmlFor = buttonId;
-				label.textContent = builder._cleanText(data.text);
+				span = L.DomUtil.create('span', 'ui-content unolabel', div);
+				span.textContent = builder._cleanText(data.text);
 
-				controls['label'] = label;
+				controls['label'] = span;
 			}
-			var disabled = data.enabled === 'false' || data.enabled === false;
+			var isDisabled = data.enabled === false;
 			if (data.command) {
 				var updateFunction = function() {
 					var items = builder.map['stateChangeHandler'];
@@ -2145,28 +2145,32 @@ L.Control.JSDialogBuilder = L.Control.extend({
 						button.setAttribute('aria-pressed', false);
 					}
 
-					if (disabled)
+					if (isDisabled) {
 						div.setAttribute('disabled', 'true');
-					else
+						div.setAttribute('aria-disabled', true);
+					} else {
 						div.removeAttribute('disabled');
+						div.removeAttribute('aria-disabled');
+					}
 				};
 
 				updateFunction();
 
 				builder.map.on('commandstatechanged', function(e) {
-					disabled = false;
+					isDisabled = false;
 					if (e.commandName === data.command)
 					{
 						// in some cases we will get both property like state and disabled
 						// to handle it we will set disable var based on INCOMING info (ex: .uno:ParaRightToLft)
-						disabled = e.disabled || e.state == 'disabled';
+						isDisabled = e.disabled || e.state == 'disabled';
 						updateFunction();
 					}
 				}, this);
 			}
 
-			if (disabled) {
+			if (isDisabled) {
 				div.setAttribute('disabled', 'true');
+				div.setAttribute('aria-disabled', true);
 			}
 
 			var selectFn = function() {
@@ -2187,10 +2191,10 @@ L.Control.JSDialogBuilder = L.Control.extend({
 			if (data.selected === true)
 				selectFn();
 		} else {
-			var label = L.DomUtil.create('label', 'ui-content unolabel', div);
-			label.textContent = builder._cleanText(data.text);
+			var span = L.DomUtil.create('span', 'ui-content unolabel', div);
+			span.textContent = builder._cleanText(data.text);
 			controls['button'] = button;
-			controls['label'] = label;
+			controls['label'] = span;
 		}
 
 		if (options && options.hasDropdownArrow) {
@@ -2218,12 +2222,18 @@ L.Control.JSDialogBuilder = L.Control.extend({
 			});
 
 			div.closeDropdown = function() {
+				div.setAttribute('aria-expanded', false);
 				builder.callback('toolbox', 'closemenu', parentContainer, data.command, builder);
 			};
 		}
 
+		if (arrowbackground) {
+			div.setAttribute('aria-expanded', false);
+		}
+
 		var openToolBoxMenu = function(event, div) {
 			if (!div.hasAttribute('disabled')) {
+				div.setAttribute('aria-expanded', true);
 				builder.callback('toolbox', 'openmenu', parentContainer, data.command, builder);
 				event.stopPropagation();
 			}
@@ -2236,8 +2246,10 @@ L.Control.JSDialogBuilder = L.Control.extend({
 					builder.map.fire('postMessage', {msgId: 'Clicked_Button', args: {Id: data.id} });
 				else if (isRealUnoCommand && data.dropdown !== true)
 					builder.callback('toolbutton', 'click', button, data.command, builder);
-				else
+				else {
 					builder.callback('toolbox', 'click', parentContainer, data.command, builder);
+					button.setAttribute('aria-expanded', true);
+				}
 			}
 			e.preventDefault();
 			e.stopPropagation();
@@ -2274,8 +2286,10 @@ L.Control.JSDialogBuilder = L.Control.extend({
 
 		builder._preventDocumentLosingFocusOnClick(div);
 
-		if (data.enabled === 'false' || data.enabled === false)
+		if (isDisabled) {
 			div.setAttribute('disabled', 'true');
+			div.setAttribute('aria-disabled', true);
+		}
 
 		builder.map.hideRestrictedItems(data, controls['container'], controls['container']);
 		builder.map.disableLockedItem(data, controls['container'], controls['container']);
@@ -2566,6 +2580,10 @@ L.Control.JSDialogBuilder = L.Control.extend({
 
 	// executes actions like changing the selection without rebuilding the widget
 	executeAction: function(container, data) {
+		app.layoutingService.appendLayoutingTask(() => { this.executeActionImpl(container, data); });
+	},
+
+	executeActionImpl: function(container, data) {
 		var control = container.querySelector('[id=\'' + this._removeMenuId(data.control_id) + '\']');
 		if (!control && data.control)
 			control = container.querySelector('[id=\'' + this._removeMenuId(data.control.id) + '\']');
@@ -2721,18 +2739,16 @@ L.Control.JSDialogBuilder = L.Control.extend({
 		var focusedElementInDialog = focusedElement ? container.querySelector('[id=\'' + focusedElement.id + '\']') : null;
 		var focusedId = focusedElementInDialog ? focusedElementInDialog.id : null;
 
-		control.style.visibility = 'hidden';
-
-		var temporaryParent = L.DomUtil.create('div');
+		var temporaryParent = new DocumentFragment();
 
 		// Remove the id of the to-be-removed control, so _makeIdUnique() won't rename
 		// data.id to something we can't find later.
 		control.id = '';
 
 		buildFunc.bind(this)(temporaryParent, [data], false);
-		parent.insertBefore(temporaryParent.firstChild, control.nextSibling);
 		var backupGridSpan = control.style.gridColumn;
-		L.DomUtil.remove(control);
+
+		control.replaceWith(temporaryParent.firstChild)
 
 		var newControl = container.querySelector('[id=\'' + elementId + '\']');
 		if (newControl) {
@@ -2798,6 +2814,7 @@ L.Control.JSDialogBuilder = L.Control.extend({
 			&& data.type !== 'time'
 			&& data.type !== 'separator'
 			&& data.type !== 'spacer'
+			&& data.type !== 'edit'
 			)
 			control.setAttribute('tabIndex', '0');
 	},

@@ -14,6 +14,7 @@
 #include "ChildSession.hpp"
 
 #include <common/Anonymizer.hpp>
+#include <common/HexUtil.hpp>
 #include <common/Log.hpp>
 #include <common/Unit.hpp>
 #include <common/Util.hpp>
@@ -79,13 +80,14 @@ std::string formatUnoCommandInfo(const std::string& unoCommand)
     std::string recorded_time = Util::getTimeNow("%Y-%m-%d %T");
 
     std::string unoCommandInfo;
+    unoCommandInfo.reserve(unoCommand.size() * 2);
 
     // unoCommand(sessionId) : command - time
     unoCommandInfo.append("unoCommand");
     unoCommandInfo.append(" : ");
     unoCommandInfo.append(Util::eliminatePrefix(unoCommand,".uno:"));
     unoCommandInfo.append(" - ");
-    unoCommandInfo.append(recorded_time);
+    unoCommandInfo.append(std::move(recorded_time));
 
     return unoCommandInfo;
 }
@@ -1332,6 +1334,17 @@ bool ChildSession::outlineState(const StringVector& tokens)
     return true;
 }
 
+std::string ChildSession::getJailDocRoot() const
+{
+    std::string jailDoc = JAILED_DOCUMENT_ROOT;
+    if (NoCapsForKit)
+    {
+        jailDoc = Poco::URI(getJailedFilePath()).getPath();
+        jailDoc = jailDoc.substr(0, jailDoc.find(JAILED_DOCUMENT_ROOT)) + JAILED_DOCUMENT_ROOT;
+    }
+    return jailDoc;
+}
+
 bool ChildSession::downloadAs(const StringVector& tokens)
 {
     std::string name, id, format, filterOptions;
@@ -1377,12 +1390,7 @@ bool ChildSession::downloadAs(const StringVector& tokens)
     const Poco::Path filenameParam(name);
     const std::string nameAnonym = anonymizeUrl(name);
 
-    std::string jailDoc = JAILED_DOCUMENT_ROOT;
-    if (NoCapsForKit)
-    {
-        jailDoc = Poco::URI(getJailedFilePath()).getPath();
-        jailDoc = jailDoc.substr(0, jailDoc.find(JAILED_DOCUMENT_ROOT)) + JAILED_DOCUMENT_ROOT;
-    }
+    std::string jailDoc = getJailDocRoot();
 
     if constexpr (!Util::isMobileApp())
         consistencyCheckJail();
@@ -1569,7 +1577,10 @@ bool ChildSession::getClipboard(const StringVector& tokens)
         {
             Util::vectorAppend(output, outMimeTypes[i]);
             Util::vectorAppend(output, "\n", 1);
-            Util::vectorAppendHex(output, outSizes[i]);
+            std::stringstream sstream;
+            sstream << std::hex << outSizes[i];
+            std::string hex = sstream.str();
+            Util::vectorAppend(output, hex.data(), hex.size());
             Util::vectorAppend(output, "\n", 1);
             Util::vectorAppend(output, outStreams[i], outSizes[i]);
             Util::vectorAppend(output, "\n", 1);
@@ -1622,7 +1633,6 @@ bool ChildSession::setClipboard(const char* buffer, int length, const StringVect
         {
             data.read(stream);
         }
-//        data.dumpState(std::cerr);
 
         const size_t inCount = html.empty() ? data.size() : 1;
         std::vector<size_t> inSizes(inCount);
@@ -1744,13 +1754,7 @@ bool ChildSession::insertFile(const StringVector& tokens)
         {
             if (type == "graphic" || type == "selectbackground" || type == "multimedia")
             {
-                std::string jailDoc = JAILED_DOCUMENT_ROOT;
-                if (NoCapsForKit)
-                {
-                    jailDoc = Poco::URI(getJailedFilePath()).getPath();
-                    jailDoc = jailDoc.substr(0, jailDoc.find(JAILED_DOCUMENT_ROOT)) +
-                              JAILED_DOCUMENT_ROOT;
-                }
+                std::string jailDoc = getJailDocRoot();
                 url = "file://" + jailDoc + "insertfile/" + name;
             }
             else if (type == "graphicurl" || type == "multimediaurl")
@@ -2099,13 +2103,7 @@ bool ChildSession::contentControlEvent(const StringVector& tokens)
         std::string name;
         if (getTokenString(tokens[2], "name", name))
         {
-            std::string jailDoc = JAILED_DOCUMENT_ROOT;
-            if (NoCapsForKit)
-            {
-                jailDoc = Poco::URI(getJailedFilePath()).getPath();
-                jailDoc =
-                    jailDoc.substr(0, jailDoc.find(JAILED_DOCUMENT_ROOT)) + JAILED_DOCUMENT_ROOT;
-            }
+            std::string jailDoc = getJailDocRoot();
             std::string url = "file://" + jailDoc + "insertfile/" + name;
             arguments += "\"changed\":\"" + url + "\"}";
         }
@@ -2275,10 +2273,12 @@ bool ChildSession::unoCommand(const StringVector& tokens)
                           tokens.equals(1, ".uno:Redo") ||
                           tokens.equals(1, ".uno:Cut") ||
                           tokens.equals(1, ".uno:Copy") ||
+                          tokens.equals(1, ".uno:CopySlide") ||
                           tokens.equals(1, ".uno:OpenHyperlink") ||
                           tokens.startsWith(1, "vnd.sun.star.script:"));
 
-    LOG_TRC("uno command " << tokens[1] << " " << tokens.cat(' ', 2) << " notify: " << bNotify);
+    const std::string saveArgs = tokens.cat(' ', 2);
+    LOG_TRC("uno command " << tokens[1] << " " << saveArgs << " notify: " << bNotify);
 
     // check that internal UNO commands don't make it to the core
     assert (!tokens.equals(1, ".uno:AutoSave"));
@@ -2288,22 +2288,13 @@ bool ChildSession::unoCommand(const StringVector& tokens)
     if (tokens.equals(1, ".uno:Copy") || tokens.equals(1, ".uno:CopyHyperlinkLocation"))
         _copyToClipboard = true;
 
-    if (tokens.size() == 2)
+    if (tokens.size() == 2 && tokens.equals(1, ".uno:fakeDiskFull"))
     {
-        if (tokens.equals(1, ".uno:fakeDiskFull"))
-        {
-            _docManager->alertAllUsers("internal", "diskfull");
-        }
-        else
-        {
-            getLOKitDocument()->postUnoCommand(tokens[1].c_str(), nullptr, bNotify);
-        }
-    }
-    else
-    {
-        getLOKitDocument()->postUnoCommand(tokens[1].c_str(), tokens.cat(' ', 2).c_str(), bNotify);
+        _docManager->alertAllUsers("internal", "diskfull");
+        return true;
     }
 
+    getLOKitDocument()->postUnoCommand(tokens[1].c_str(), saveArgs.c_str(), bNotify);
     return true;
 }
 
@@ -2829,12 +2820,7 @@ bool ChildSession::saveAs(const StringVector& tokens)
             return false;
         }
 
-        std::string jailDoc = JAILED_DOCUMENT_ROOT;
-        if (NoCapsForKit)
-        {
-            jailDoc = Poco::URI(getJailedFilePath()).getPath();
-            jailDoc = jailDoc.substr(0, jailDoc.find(JAILED_DOCUMENT_ROOT)) + JAILED_DOCUMENT_ROOT;
-        }
+        std::string jailDoc = getJailDocRoot();
 
         const std::string tmpDir = FileUtil::createRandomDir(jailDoc);
         const Poco::Path filenameParam(pathSegments[pathSegments.size() - 1]);

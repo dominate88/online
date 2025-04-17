@@ -26,7 +26,7 @@
 
 void CheckFileInfo::checkFileInfo(int redirectLimit)
 {
-    const std::string uriAnonym = COOLWSD::anonymizeUrl(_url.toString());
+    std::string uriAnonym = COOLWSD::anonymizeUrl(_url.toString());
 
     LOG_DBG("Getting info for wopi uri [" << uriAnonym << ']');
     _httpSession = StorageConnectionManager::getHttpSession(_url);
@@ -39,7 +39,8 @@ void CheckFileInfo::checkFileInfo(int redirectLimit)
                                                            << httpRequest.header());
 
     http::Session::FinishedCallback finishedCallback =
-        [selfWeak = weak_from_this(), this, startTime, uriAnonym, redirectLimit](const std::shared_ptr<http::Session>& session)
+        [selfWeak = weak_from_this(), this, startTime,
+         uriAnonym = std::move(uriAnonym), redirectLimit](const std::shared_ptr<http::Session>& session)
     {
         session->asyncShutdown();
 
@@ -168,7 +169,7 @@ void CheckFileInfo::checkFileInfo(int redirectLimit)
     _state = State::Active;
 
     // Run the CheckFileInfo request on the WebServer Poll.
-    _httpSession->asyncRequest(httpRequest, *_poll);
+    _httpSession->asyncRequest(httpRequest, _poll);
 }
 
 void CheckFileInfo::checkFileInfoSync(int redirectionLimit)

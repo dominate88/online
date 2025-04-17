@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
 /*
  * Copyright the Collabora Online contributors.
@@ -24,7 +25,6 @@ class AutoFillPreviewTooltip extends L.Control.AutoCompletePopup {
 
 	onAdd() {
 		this.newPopupData.isAutoFillPreviewTooltip = true;
-		this.newPopupData.canHaveFocus = false;
 		this.newPopupData.noOverlay = true;
 		this.newPopupData.id = 'autoFillPreviewTooltip';
 

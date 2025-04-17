@@ -11,14 +11,15 @@
 
 #pragma once
 
-#include "NetUtil.hpp"
-#include "Socket.hpp"
-#include "common/Log.hpp"
-#include "common/Protocol.hpp"
-#include "common/Unit.hpp"
-#include "common/Util.hpp"
-#include <limits>
+#include <common/HexUtil.hpp>
+#include <common/Log.hpp>
+#include <common/Protocol.hpp>
+#include <common/Unit.hpp>
+#include <common/Util.hpp>
+#include <net/HttpHelper.hpp>
 #include <net/HttpRequest.hpp>
+#include <net/NetUtil.hpp>
+#include <net/Socket.hpp>
 
 #include <Poco/Net/HTTPResponse.h>
 
@@ -93,7 +94,8 @@ public:
     /// socket: the TCP socket which received the upgrade request
     /// request: the HTTP upgrade request to WebSocket
     template <typename T>
-    WebSocketHandler(const std::shared_ptr<StreamSocket>& socket, const T& request)
+    WebSocketHandler(const std::shared_ptr<StreamSocket>& socket, const T& request,
+                     const std::string& expectedOrigin = "")
         : WebSocketHandler(/*isClient=*/false, /*isMasking=*/false)
     {
         if (!socket)
@@ -104,7 +106,7 @@ public:
 
         // As a server, respond with 101 protocol-upgrade.
         assert(!_isClient);
-        upgradeToWebSocket(socket, request);
+        upgradeToWebSocket(socket, request, expectedOrigin);
     }
 
     /// Status codes sent to peer on shutdown.
@@ -152,6 +154,10 @@ public:
 
         req.set("Host", hostAndPort); // Make sure the host is set.
 
+        // Set a consistent Origin
+        std::string protocol = isSecure ? "https" : "http";
+        req.set("Origin", protocol + "://" + hostAndPort);
+
         req.header().setConnectionToken(http::Header::ConnectionToken::Upgrade);
         req.set("Upgrade", "websocket");
         req.set("Sec-WebSocket-Version", "13");
@@ -172,6 +178,7 @@ protected:
     /// Implementation of the ProtocolHandlerInterface.
     void onConnect(const std::shared_ptr<StreamSocket>& socket) override
     {
+        ASSERT_CORRECT_THREAD();
         LOG_ASSERT_MSG(socket, "Invalid socket passed to WebSocketHandler::onConnect");
 
         _socket = socket;
@@ -220,6 +227,7 @@ protected:
 
     void shutdown(bool goingAway, const std::string &statusMessage) override
     {
+        ASSERT_CORRECT_THREAD();
         shutdownImpl(_socket.lock(),
                      goingAway ? WebSocketHandler::StatusCodes::ENDPOINT_GOING_AWAY :
                      WebSocketHandler::StatusCodes::NORMAL_CLOSE, statusMessage,
@@ -373,8 +381,9 @@ private:
         }
 
         LOGA_TRC(WebSocket, "Incoming WebSocket data of "
-                << len << " bytes: "
-                << Util::stringifyHexLine(socket->getInBuffer(), 0, std::min((size_t)32, len)));
+                                << len << " bytes: "
+                                << HexUtil::stringifyHexLine(socket->getInBuffer(), 0,
+                                                             std::min((size_t)32, len)));
 
         unsigned char *data = p + headerLen;
 
@@ -494,11 +503,12 @@ private:
 #if !MOBILEAPP
 
         LOGA_TRC(WebSocket, "Incoming WebSocket frame code "
-            << static_cast<unsigned>(code) << ", fin? " << fin << ", mask? " << hasMask
-            << ", payload length: " << payloadLen
-            << ", residual socket data: " << socket->getInBuffer().size()
-            << " bytes, unmasked data: " +
-                   Util::stringifyHexLine(_wsPayload, 0, std::min((size_t)32, _wsPayload.size())));
+                                << static_cast<unsigned>(code) << ", fin? " << fin << ", mask? "
+                                << hasMask << ", payload length: " << payloadLen
+                                << ", residual socket data: " << socket->getInBuffer().size()
+                                << " bytes, unmasked data: " +
+                                       HexUtil::stringifyHexLine(
+                                           _wsPayload, 0, std::min((size_t)32, _wsPayload.size())));
 
         if (fin)
         {
@@ -553,6 +563,7 @@ protected:
     /// Implementation of the ProtocolHandlerInterface.
     void handleIncomingMessage(SocketDisposition&) override
     {
+        ASSERT_CORRECT_THREAD();
         std::shared_ptr<StreamSocket> socket = _socket.lock();
 
         if constexpr (Util::isMobileApp())
@@ -589,6 +600,7 @@ protected:
     int getPollEvents([[maybe_unused]] std::chrono::steady_clock::time_point now,
                       [[maybe_unused]] int64_t& timeoutMaxMicroS) override
     {
+        ASSERT_CORRECT_THREAD();
 #if !MOBILEAPP
         if (!_isClient)
         {
@@ -652,6 +664,7 @@ public:
     /// Do we need to handle a timeout ?
     bool checkTimeout([[maybe_unused]] std::chrono::steady_clock::time_point now) override
     {
+        ASSERT_CORRECT_THREAD();
 #if !MOBILEAPP
         if (_isClient)
             return false;
@@ -671,12 +684,14 @@ public:
 public:
     void performWrites(std::size_t capacity) override
     {
+        ASSERT_CORRECT_THREAD();
         if (_msgHandler)
             _msgHandler->writeQueuedMessages(capacity);
     }
 
     void onDisconnect() override
     {
+        ASSERT_CORRECT_THREAD();
         if (_msgHandler)
             _msgHandler->onDisconnect();
     }
@@ -695,12 +710,14 @@ public:
     /// Implementation of the ProtocolHandlerInterface.
     int sendTextMessage(const char* msg, const size_t len, bool flush = false) const override
     {
+        ASSERT_CORRECT_THREAD();
         return sendMessage(msg, len, WSOpCode::Text, flush);
     }
 
     /// Implementation of the ProtocolHandlerInterface.
     int sendBinaryMessage(const char *data, const size_t len, bool flush = false) const override
     {
+        ASSERT_CORRECT_THREAD();
         return sendMessage(data, len, WSOpCode::Binary, flush);
     }
 
@@ -724,6 +741,7 @@ public:
 
     bool processInputEnabled() const override
     {
+        ASSERT_CORRECT_THREAD();
         std::shared_ptr<StreamSocket> socket = _socket.lock();
         if (socket)
             return socket->processInputEnabled();
@@ -844,7 +862,7 @@ protected:
                 if (len < 256)
                 {
                     raw = std::string(data, len);
-                    hex = "whole string:" + Util::dumpHex(raw);
+                    hex = "whole string:" + HexUtil::dumpHex(raw);
                 }
                 else
                 {
@@ -857,8 +875,9 @@ protected:
                     croplen = std::min<size_t>(len - cropstart, 128);
                     assert (cropstart + croplen <= len);
                     raw = std::string(data + cropstart, croplen);
-                    hex = "msg: "+ COOLProtocol::getAbbreviatedMessage(data, len) +
-                        " string region error at byte " + std::to_string(offset - cropstart) + ": " + Util::dumpHex(raw);
+                    hex = "msg: " + COOLProtocol::getAbbreviatedMessage(data, len) +
+                          " string region error at byte " + std::to_string(offset - cropstart) +
+                          ": " + HexUtil::dumpHex(raw);
                 };
                 std::cerr << "attempting to send invalid UTF-8 message '" << raw << "' "
                           << " error at offset " << std::hex << "0x" << offset << std::dec
@@ -987,7 +1006,8 @@ protected:
     /// Upgrade the http(s) connection to a websocket.
     template <typename T>
     void upgradeToWebSocket(const std::shared_ptr<StreamSocket>& socket,
-                            [[maybe_unused]] const T& req)
+                            [[maybe_unused]] const T& req,
+                            [[maybe_unused]] const std::string& expectedOrigin)
     {
         assert(socket && "Must have a valid socket");
         LOGA_TRC(WebSocket, "Upgrading to WebSocket");
@@ -1003,6 +1023,18 @@ protected:
         LOG_INF("WebSocket version: " << wsVersion << ", key: [" << wsKey << "], protocol: ["
                                       << wsProtocol << ']');
 
+        /* SHOULD verify the Origin field is an origin they expect. If the origin indicated is
+         * unacceptable to the server, then it SHOULD respond ... with a reply containing HTTP
+         * 403 Forbidden status code.
+         */
+        const std::string origin = req.get("Origin", "");
+        if (origin != expectedOrigin)
+        {
+            LOG_ERR("Rejecting WebSocket upgrade with: origin [" << origin << ']' <<
+                    " expected [" << expectedOrigin << "] instead");
+            HttpHelper::sendErrorAndShutdown(http::StatusCode::Forbidden, socket);
+            return;
+        }
 #if ENABLE_DEBUG
         if (std::getenv("COOL_ZERO_BUFFER_SIZE"))
             socket->setSocketBufferSize(0);

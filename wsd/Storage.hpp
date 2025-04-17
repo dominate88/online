@@ -174,10 +174,10 @@ public:
         void dumpState(std::ostream& os, const std::string& indent = "\n  ") const
         {
             os << indent << "StorageBase::Attributes:";
-            os << indent << "forced: " << std::boolalpha << isForced();
-            os << indent << "user-modified: " << std::boolalpha << isUserModified();
-            os << indent << "auto-save: " << std::boolalpha << isAutosave();
-            os << indent << "exit-save: " << std::boolalpha << isExitSave();
+            os << indent << "forced: " << isForced();
+            os << indent << "user-modified: " << isUserModified();
+            os << indent << "auto-save: " << isAutosave();
+            os << indent << "exit-save: " << isExitSave();
             os << indent << "extended-data: " << getExtendedData();
         }
 
@@ -409,7 +409,7 @@ public:
     /// Update the locking state (check-in/out) of the associated file asynchronously.
     virtual void updateLockStateAsync(const Authorization& auth, LockContext& lockCtx,
                                       LockState lock, const Attributes& attribs,
-                                      SocketPoll& socketPoll,
+                                      const std::shared_ptr<SocketPoll>& socketPoll,
                                       const AsyncLockStateCallback& asyncLockStateCallback) = 0;
 
     /// Returns a local file path for the given URI.
@@ -427,7 +427,8 @@ public:
     virtual std::size_t
     uploadLocalFileToStorageAsync(const Authorization& auth, LockContext& lockCtx,
                                   const std::string& saveAsPath, const std::string& saveAsFilename,
-                                  bool isRename, const Attributes&, SocketPoll&,
+                                  bool isRename, const Attributes&,
+                                  const std::shared_ptr<SocketPoll>&,
                                   const AsyncUploadCallback& asyncUploadCallback) = 0;
 
     /// Get the progress state of an asynchronous LocalFileToStorage upload.
@@ -470,7 +471,7 @@ public:
 
         os << indent << "StorageBase:";
         os << indent << "uri: " << _uri.toString();
-        os << indent << "isDownloaded: " << std::boolalpha << _isDownloaded;
+        os << indent << "isDownloaded: " << _isDownloaded;
         os << indent << "localStorePath: " << _localStorePath;
         os << indent << "jailPath: " << _jailPath;
         os << indent << "jailedFilePath: " << _jailedFilePath;
@@ -575,7 +576,7 @@ public:
     }
 
     void updateLockStateAsync(const Authorization&, LockContext&, LockState requestedLockState,
-                              const Attributes&, SocketPoll&,
+                              const Attributes&, const std::shared_ptr<SocketPoll>&,
                               const AsyncLockStateCallback& asyncLockStateCallback) override
     {
         if (asyncLockStateCallback)
@@ -592,7 +593,8 @@ public:
     std::size_t
     uploadLocalFileToStorageAsync(const Authorization& auth, LockContext& lockCtx,
                                   const std::string& saveAsPath, const std::string& saveAsFilename,
-                                  bool isRename, const Attributes&, SocketPoll&,
+                                  bool isRename, const Attributes&,
+                                  const std::shared_ptr<SocketPoll>&,
                                   const AsyncUploadCallback& asyncUploadCallback) override;
 
 private:
@@ -652,7 +654,7 @@ public:
     void bumpTimer() { _lastLockTime = std::chrono::steady_clock::now(); }
 
     /// do we need to refresh our lock ?
-    bool needsRefresh(const std::chrono::steady_clock::time_point& now) const;
+    bool needsRefresh(const std::chrono::steady_clock::time_point now) const;
 
     void dumpState(std::ostream& os) const;
 };

@@ -13,7 +13,18 @@
 
 #include <config.h>
 
-#include <unistd.h>
+#include <common/HexUtil.hpp>
+#include <common/Log.hpp>
+#include <common/Util.hpp>
+#include <common/Protocol.hpp>
+#include <net/ServerSocket.hpp>
+#include <net/WebSocketHandler.hpp>
+#if !MOBILEAPP
+#include <net/HttpHelper.hpp>
+#endif
+#if ENABLE_SSL
+#include <net/SslSocket.hpp>
+#endif
 
 #include <Poco/URI.h>
 #include <Poco/MemoryStream.h>
@@ -21,17 +32,7 @@
 #include <Poco/Net/HTTPResponse.h>
 #include <Poco/Util/XMLConfiguration.h>
 
-#include <Log.hpp>
-#include <Util.hpp>
-#include <Protocol.hpp>
-#include <ServerSocket.hpp>
-#include <WebSocketHandler.hpp>
-#if !MOBILEAPP
-#include <net/HttpHelper.hpp>
-#endif
-#if ENABLE_SSL
-#  include <SslSocket.hpp>
-#endif
+#include <unistd.h>
 
 // Dumps incoming websocket messages and doesn't respond.
 class DumpSocketHandler : public WebSocketHandler
@@ -48,7 +49,7 @@ private:
     void handleMessage(const std::vector<char> &data) override
     {
         std::cout << "WebSocket message data:\n";
-        Util::dumpHex(std::cout, data, "", "    ", false);
+        HexUtil::dumpHex(std::cout, data, "", "    ", false);
     }
 };
 
@@ -222,7 +223,7 @@ int main (int argc, char **argv)
 {
     (void) argc; (void) argv;
 
-    SocketPoll DumpSocketPoll("websocket");
+    std::shared_ptr<SocketPoll> DumpSocketPoll = std::make_shared<SocketPoll>("websocket");
 
     if (!UnitWSD::init(UnitWSD::UnitType::Wsd, ""))
     {
@@ -261,13 +262,13 @@ int main (int argc, char **argv)
                                               ssl::CertificateVerification::Disabled);
 #endif
 
-    SocketPoll acceptPoll("accept");
+    std::shared_ptr<SocketPoll> acceptPoll = std::make_shared<SocketPoll>("accept");
 
     // Setup listening socket with a factory for connected sockets.
     auto serverSocket = std::make_shared<ServerSocket>(
         Socket::Type::All,
         std::chrono::steady_clock::now(),
-        DumpSocketPoll,
+        *DumpSocketPoll,
         std::make_shared<DumpSocketFactory>(isSSL));
 
     if (!serverSocket->bind(ServerSocket::Type::Public, port))
@@ -282,12 +283,12 @@ int main (int argc, char **argv)
         return -1;
     }
 
-    acceptPoll.startThread();
-    acceptPoll.insertNewSocket(serverSocket);
+    acceptPoll->startThread();
+    acceptPoll->insertNewSocket(serverSocket);
 
     while (true)
     {
-        DumpSocketPoll.poll(std::chrono::seconds(100));
+        DumpSocketPoll->poll(std::chrono::seconds(100));
     }
 }
 

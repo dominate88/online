@@ -1,4 +1,14 @@
+// @ts-strict-ignore
 /* -*- js-indent-level: 8 -*- */
+/*
+ * Copyright the Collabora Online contributors.
+ *
+ * SPDX-License-Identifier: MPL-2.0
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
 
 class URLPopUpSection extends HTMLObjectSection {
     static sectionName = 'URL PopUp';
@@ -146,7 +156,7 @@ class URLPopUpSection extends HTMLObjectSection {
 	}
 
 	public static resetPosition(section: URLPopUpSection) {
-		if (!section) section = app.sectionContainer.getSectionWithName(URLPopUpSection.sectionName);
+		if (!section) section = app.sectionContainer.getSectionWithName(URLPopUpSection.sectionName) as URLPopUpSection;
 		if (!section) return;
 
 		let originalLeft = section.sectionProperties.documentPosition.pX - section.getPopUpWidth() * 0.5 * app.dpiScale;

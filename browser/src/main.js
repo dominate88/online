@@ -11,7 +11,7 @@
  */
 
 /* global errorMessages accessToken accessTokenTTL accessHeader createOnlineModule */
-/* global app $ L host idleTimeoutSecs outOfFocusTimeoutSecs _ */
+/* global app $ L host idleTimeoutSecs outOfFocusTimeoutSecs _ LocaleService LayoutingService */
 /*eslint indent: [error, "tab", { "outerIIFEBody": 0 }]*/
 
 (function (global) {
@@ -33,7 +33,9 @@ if (window.ThisIsTheEmscriptenApp)
 else
 	var filePath = global.coolParams.get('file_path');
 
+app.localeService = new LocaleService();
 app.setPermission(global.coolParams.get('permission') || 'edit');
+app.layoutingService = new LayoutingService();
 
 var timestamp = global.coolParams.get('timestamp');
 var target = global.coolParams.get('target') || '';

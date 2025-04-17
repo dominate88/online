@@ -33,6 +33,7 @@ interface ConfigData {
 
 interface SectionConfig {
 	sectionTitle: string;
+	sectionDesc: string;
 	listId: string;
 	inputId: string;
 	buttonId: string;
@@ -40,10 +41,12 @@ interface SectionConfig {
 	buttonText: string;
 	uploadPath: string;
 	enabledFor?: string;
+	debugOnly?: boolean;
 }
 
 class SettingIframe {
 	private wordbook;
+	private xcuEditor;
 
 	private API_ENDPOINTS = {
 		uploadSettings: window.enableDebug
@@ -69,6 +72,11 @@ class SettingIframe {
 		this.wordbook = (window as any).WordBook;
 	}
 
+	public async uploadXcuFile(filename: string, content: string): Promise<void> {
+		const file = new File([content], filename, { type: 'application/xml' });
+		await this.uploadFile(this.PATH.XcuUpload(), file);
+	}
+
 	async uploadWordbookFile(filename: string, content: string): Promise<void> {
 		const file = new File([content], filename, { type: 'text/plain' });
 		await this.uploadFile(this.PATH.wordBookUpload(), file);
@@ -86,34 +94,11 @@ class SettingIframe {
 		window.cssVars = element.dataset.cssVars;
 		if (window.cssVars) {
 			window.cssVars = atob(window.cssVars);
-			const styleEl = document.createElement('style');
-			styleEl.setAttribute('id', 'dynamic-css-vars');
-			styleEl.textContent = window.cssVars;
-			document.head.appendChild(styleEl);
-		}
-
-		if (window.enableDebug) {
-			const debugInfoList = document.createElement('ul');
-			const debugInfoEle1 = document.createElement('li');
-			debugInfoEle1.textContent = 'AccessToken: ' + window.accessToken;
-			debugInfoList.append(debugInfoEle1);
-
-			const debugInfoEle2 = document.createElement('li');
-			debugInfoEle2.textContent = 'WOPI Base URL: ' + window.wopiSettingBaseUrl;
-			debugInfoList.append(debugInfoEle2);
-
-			const debugInfoEle3 = document.createElement('li');
-			debugInfoEle3.textContent = 'IFrameType: ' + window.iframeType;
-			debugInfoList.append(debugInfoEle3);
-
-			const debugInfo = document.createElement('div');
-			const debugInfoHeading = document.createElement('h4');
-			debugInfoHeading.textContent = 'DebugInfo: ';
-			debugInfo.append(debugInfoHeading);
-			debugInfo.append(debugInfoList);
-
-			const fileControls = document.getElementById('fileControls');
-			fileControls?.append(debugInfo);
+			const sheet = new CSSStyleSheet();
+			if (typeof (sheet as any).replace === 'function') {
+				(sheet as any).replace(window.cssVars);
+				(document as any).adoptedStyleSheets.push(sheet);
+			}
 		}
 	}
 
@@ -124,6 +109,8 @@ class SettingIframe {
 		const configSections: SectionConfig[] = [
 			{
 				sectionTitle: 'Autotext',
+				sectionDesc:
+					'Upload reusable text snippets (.bau). To insert the text in your document, type the shortcut for an AutoText entry and press F3.',
 				listId: 'autotextList',
 				inputId: 'autotextFile',
 				buttonId: 'uploadAutotextButton',
@@ -132,7 +119,9 @@ class SettingIframe {
 				uploadPath: this.PATH.autoTextUpload(),
 			},
 			{
-				sectionTitle: 'Wordbook',
+				sectionTitle: 'Custom Dictionaries',
+				sectionDesc:
+					'Add or edit words in a spell check dictionary. Words in your wordbook (.dic) will be available for spelling checks.',
 				listId: 'wordbookList',
 				inputId: 'wordbookFile',
 				buttonId: 'uploadWordbookButton',
@@ -141,28 +130,37 @@ class SettingIframe {
 				uploadPath: this.PATH.wordBookUpload(),
 			},
 			{
-				sectionTitle: 'Browser Settings',
+				sectionTitle: 'Interface',
+				sectionDesc: 'Set default interface preferences.',
 				listId: 'BrowserSettingsList',
 				inputId: 'BrowserSettingsFile',
 				buttonId: 'uploadBrowserSettingsButton',
 				fileAccept: '.json',
-				buttonText: 'Upload Browser Setting',
+				// TODO: replace btn with rich interface (toggles)
+				buttonText: 'Upload Configuration',
 				uploadPath: this.PATH.browserSettingsUpload(),
 				enabledFor: 'userconfig',
 			},
 			{
-				sectionTitle: 'Xcu',
+				sectionTitle: 'Document View',
+				sectionDesc: 'Adjust how office documents look.',
 				listId: 'XcuList',
 				inputId: 'XcuFile',
 				buttonId: 'uploadXcuButton',
 				fileAccept: '.xcu',
+				// TODO: replace btn with rich interface (toggles)
 				buttonText: 'Upload Xcu',
 				uploadPath: this.PATH.XcuUpload(),
+				debugOnly: true,
 			},
 		];
 
 		configSections.forEach((cfg) => {
 			if (cfg.enabledFor && cfg.enabledFor !== this.getConfigType()) {
+				return;
+			}
+
+			if (cfg.debugOnly && !window.enableDebug) {
 				return;
 			}
 
@@ -231,9 +229,12 @@ class SettingIframe {
 			}
 
 			const data: ConfigData = await response.json();
-			this.populateSharedConfigUI(data);
+			await this.populateSharedConfigUI(data);
 			console.debug('Shared config data: ', data);
 		} catch (error: unknown) {
+			this.showErrorModal(
+				'Something went wrong, Please try to refresh the page.',
+			);
 			console.error('Error fetching shared config:', error);
 		}
 	}
@@ -244,6 +245,9 @@ class SettingIframe {
 
 		const headingEl = document.createElement('h3');
 		headingEl.textContent = config.sectionTitle;
+
+		const descEl = document.createElement('p');
+		descEl.textContent = config.sectionDesc;
 
 		const ulEl = document.createElement('ul');
 		ulEl.id = config.listId;
@@ -260,7 +264,6 @@ class SettingIframe {
 		buttonEl.classList.add(
 			'inline-button',
 			'button',
-			'button--size-normal',
 			'button--text-only',
 			'button--vue-secondary',
 		);
@@ -271,6 +274,7 @@ class SettingIframe {
 		`;
 
 		sectionEl.appendChild(headingEl);
+		sectionEl.appendChild(descEl);
 		sectionEl.appendChild(ulEl);
 		sectionEl.appendChild(inputEl);
 		sectionEl.appendChild(buttonEl);
@@ -278,6 +282,36 @@ class SettingIframe {
 		return sectionEl;
 	}
 
+	private async fetchSettingFile(fileId: string) {
+		try {
+			const formData = new FormData();
+			formData.append('fileUrl', fileId);
+			formData.append('accessToken', window.accessToken ?? '');
+
+			const apiUrl = this.API_ENDPOINTS.fetchWordbook;
+
+			const response = await fetch(apiUrl, {
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${window.accessToken}`,
+				},
+				body: formData,
+			});
+
+			if (!response.ok) {
+				throw new Error(`Upload failed: ${response.statusText}`);
+			}
+
+			return await response.text();
+		} catch (error) {
+			this.showErrorModal(
+				'Something went wrong while fetching setting file, Please try to refresh the page.',
+			);
+			return null;
+		}
+	}
+
+	// TODO: Re-use fetchSettingFile function to fetch wordbook?
 	private async fetchWordbookFile(fileId: string): Promise<void> {
 		this.wordbook.startLoader();
 		const formData = new FormData();
@@ -308,6 +342,9 @@ class SettingIframe {
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
 			console.error(`Error uploading file: ${message}`);
+			this.showErrorModal(
+				'Something went wrong while fetching wordbook, Please try to refresh the page.',
+			);
 			this.wordbook.stopLoader();
 		}
 	}
@@ -339,6 +376,9 @@ class SettingIframe {
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : 'Unknown error';
 			console.error(`Error uploading file: ${message}`);
+			this.showErrorModal(
+				'Something went wrong while uploading the file. Please try again.',
+			);
 		}
 	}
 
@@ -385,7 +425,6 @@ class SettingIframe {
 			downloadBtn.type = 'button';
 			downloadBtn.classList.add(
 				'button',
-				'button--size-normal',
 				'button--icon-only',
 				'button--vue-secondary',
 				'download-icon',
@@ -411,7 +450,6 @@ class SettingIframe {
 			deleteBtn.type = 'button';
 			deleteBtn.classList.add(
 				'button',
-				'button--size-normal',
 				'button--icon-only',
 				'button--vue-secondary',
 				'delete-icon',
@@ -463,6 +501,9 @@ class SettingIframe {
 
 					await this.fetchAndPopulateSharedConfigs();
 				} catch (error: unknown) {
+					this.showErrorModal(
+						'Something went wrong while deleting the file. Please try refreshing the page.',
+					);
 					console.error('Error deleting file:', error);
 				}
 			});
@@ -475,7 +516,6 @@ class SettingIframe {
 				editBtn.type = 'button';
 				editBtn.classList.add(
 					'button',
-					'button--size-normal',
 					'button--icon-only',
 					'button--vue-secondary',
 					'edit-icon',
@@ -503,7 +543,7 @@ class SettingIframe {
 		});
 	}
 
-	private populateSharedConfigUI(data: ConfigData): void {
+	private async populateSharedConfigUI(data: ConfigData): Promise<void> {
 		const browserSettingButton = document.getElementById(
 			'uploadBrowserSettingsButton',
 		) as HTMLButtonElement | null;
@@ -528,7 +568,35 @@ class SettingIframe {
 			}
 		}
 
-		// todo: dynamically generate this list too from configSections
+		if (data.xcu && data.xcu.length > 0) {
+			const fileId = data.xcu[0].uri;
+			const xcuFileContent = await this.fetchSettingFile(fileId);
+			this.xcuEditor = new (window as any).Xcu(
+				this.getFilename(fileId, false),
+				xcuFileContent,
+			);
+
+			const settingsContainer = document.getElementById('allConfigSection');
+			if (!settingsContainer) return;
+
+			const existingXcuSection = document.getElementById('xcu-section');
+			if (existingXcuSection) {
+				existingXcuSection.remove();
+			}
+
+			const xcuContainer = document.createElement('div');
+			xcuContainer.id = 'xcu-section';
+			xcuContainer.classList.add('section');
+			settingsContainer.appendChild(
+				this.xcuEditor.createXcuEditorUI(xcuContainer),
+			);
+		} else {
+			// If user don't have any xcu file, We generate with default settings...
+			this.xcuEditor = new (window as any).Xcu('documentView.xcu', null);
+			this.xcuEditor.generateXcuAndUpload();
+			return await this.fetchAndPopulateSharedConfigs();
+		}
+
 		if (data.autotext)
 			this.populateList('autotextList', data.autotext, '/autotext');
 		if (data.wordbook)
@@ -550,6 +618,39 @@ class SettingIframe {
 		return window.iframeType === 'admin';
 	}
 
+	private showErrorModal(message: string): void {
+		const modal = document.createElement('div');
+		modal.className = 'modal';
+
+		const modalContent = document.createElement('div');
+		modalContent.className = 'modal-content';
+
+		const header = document.createElement('h2');
+		header.textContent = 'Error';
+		header.style.textAlign = 'center';
+		modalContent.appendChild(header);
+
+		const messageEl = document.createElement('p');
+		messageEl.textContent = message;
+		modalContent.appendChild(messageEl);
+
+		const buttonContainer = document.createElement('div');
+		buttonContainer.className = 'modal-button-container';
+
+		const okButton = document.createElement('button');
+		okButton.textContent = 'OK';
+		okButton.classList.add('button', 'button--vue-secondary');
+		okButton.addEventListener('click', () => {
+			document.body.removeChild(modal);
+		});
+
+		buttonContainer.appendChild(okButton);
+		modalContent.appendChild(buttonContainer);
+
+		modal.appendChild(modalContent);
+		document.body.appendChild(modal);
+	}
+
 	private settingConfigBasePath(): string {
 		return '/settings/' + this.getConfigType();
 	}
@@ -563,8 +664,10 @@ class SettingIframe {
 	}
 }
 
-(window as any).settingIframe = new SettingIframe();
-
 document.addEventListener('DOMContentLoaded', () => {
-	(window as any).settingIframe.init();
+	const adminContainer = document.getElementById('allConfigSection');
+	if (adminContainer) {
+		(window as any).settingIframe = new SettingIframe();
+		(window as any).settingIframe.init();
+	}
 });

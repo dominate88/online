@@ -32,35 +32,35 @@ AM_CXXFLAGS = $(CPPUNIT_CFLAGS) -DTDOC=\"$(abs_top_srcdir)/test/data\" -DTDIST=\
 # 'Finished in' in the `make check` output.
 # When adding new tests, please maintain order.
 all_la_unit_tests = \
+	unit-httpws.la \
 	unit-perf.la \
+	unit-wopi-async-slow.la \
+	unit-wopi-lock.la \
+	unit-tiletest.la \
+	unit-wopi-documentconflict.la \
+	unit-wopi-stuck-save.la \
+	unit-close.la \
+	unit-wopi-watermark.la \
+	unit-crash.la \
 	unit-proxy.la \
 	unit-synthetic-lok.la \
-	unit-wopi-async-slow.la \
-	unit-tiletest.la \
 	unit-wopi-fail-upload.la \
 	unit-each-view.la \
-	unit-wopi-stuck-save.la \
 	unit-load.la \
 	unit-integration.la \
-	unit-httpws.la \
 	unit-quarantine.la \
 	unit-multi-tenant.la \
 	unit-load-torture.la \
 	unit-save-torture.la \
 	unit-copy-paste.la \
 	unit-copy-paste-writer.la \
-	unit-crash.la \
 	unit-wopi-fileurl.la \
 	unit-wopi-save-on-exit.la \
-	unit-wopi-documentconflict.la \
-	unit-close.la \
 	unit-wopi-languages.la \
 	unit-insert-delete.la \
 	unit-password-protected.la \
 	unit-uno-command.la \
 	unit-wopi-httpredirect.la \
-	unit-wopi-watermark.la \
-	unit-wopi-lock.la \
 	unit-calc.la \
 	unit-http.la \
 	unit-wopi-temp.la \
@@ -99,6 +99,7 @@ all_la_unit_tests = \
 	unit-timeout_none.la \
 	unit-serversock_accept1.la \
 	unit-streamsock_ctor1.la \
+	unit-user-presets.la \
 	unit-base.la
 #	unit-admin.la
 #	unit-tilecache.la # Empty test.
@@ -342,6 +343,8 @@ unit_quarantine_la_SOURCES = UnitQuarantine.cpp
 unit_quarantine_la_LIBADD = $(CPPUNIT_LIBS)
 unit_multi_tenant_la_SOURCES = UnitMultiTenant.cpp
 unit_multi_tenant_la_LIBADD = $(CPPUNIT_LIBS)
+unit_user_presets_la_SOURCES = UnitUserPresets.cpp
+unit_user_presets_la_LIBADD = $(CPPUNIT_LIBS)
 unit_perf_la_SOURCES = UnitPerf.cpp
 unit_perf_la_LIBADD = $(CPPUNIT_LIBS) $(LIBPFM_LIBS)
 unit_proxy_la_SOURCES = UnitProxy.cpp

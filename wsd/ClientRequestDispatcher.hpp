@@ -21,6 +21,8 @@
 #include <string>
 #include <memory>
 
+enum class CheckStatus : char;
+
 /// Handles incoming connections and dispatches to the appropriate handler.
 class ClientRequestDispatcher final : public SimpleSocketHandler
 {
@@ -114,6 +116,8 @@ private:
                                   const RequestDetails& requestDetails,
                                   Poco::MemoryInputStream& message, SocketDisposition& disposition);
 
+    void sendResult(const std::shared_ptr<StreamSocket>& socket, CheckStatus result);
+
 #endif // !MOBILEAPP
 
     /// @return true if request has been handled synchronously and response sent, otherwise false
@@ -173,3 +177,5 @@ private:
     /// Cache for static files, to avoid reading and processing from disk.
     static std::map<std::string, std::string> StaticFileContentCache;
 };
+
+/* vim:set shiftwidth=4 softtabstop=4 expandtab: */

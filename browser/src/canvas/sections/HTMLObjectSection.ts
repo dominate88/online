@@ -1,3 +1,4 @@
+// @ts-strict-ignore
 /* global Proxy _ */
 /*
  * Copyright the Collabora Online contributors.
@@ -79,7 +80,7 @@ class HTMLObjectSection extends CanvasSectionObject {
 			this.sectionProperties.objectDiv.style.top = top;
 	}
 
-	onDraw(frameCount?: number, elapsedTime?: number, subsetBounds?: Bounds): void {
+	onDraw(frameCount?: number, elapsedTime?: number): void {
 		this.adjustHTMLObjectPosition();
 	}
 

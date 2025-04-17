@@ -221,7 +221,7 @@ static bool getRawConfig(const Poco::Util::AbstractConfiguration& config, const 
 
 template <typename T>
 static T getConfigValue(const Poco::Util::AbstractConfiguration& config, const std::string& name,
-                        const T def)
+                        T def)
 {
     T value = def;
     if (getRawConfig(config, name, value) || getRawConfig(config, name + "[@default]", value))
@@ -260,19 +260,19 @@ static std::string getPathFromConfig(const Poco::Util::AbstractConfiguration& co
 
 /// Returns the value of the specified application configuration,
 /// or the default, if one doesn't exist.
-template <typename T> static T getConfigValue(const std::string& name, const T def)
+template <typename T> static T getConfigValue(const std::string& name, T def)
 {
     if (Util::isFuzzing())
     {
         return def;
     }
 
-    return getConfigValue(Poco::Util::Application::instance().config(), name, def);
+    return getConfigValue(Poco::Util::Application::instance().config(), name, std::move(def));
 }
 
 /// Returns the value of the specified application configuration,
 /// or the default, if one doesn't exist.
-template <typename T> static T getConfigValueNonZero(const std::string& name, const T def)
+template <typename T> static T getConfigValueNonZero(const std::string& name, T def)
 {
     static_assert(std::is_integral<T>::value, "Meaningless on non-integral types");
 
@@ -309,7 +309,10 @@ inline std::string getPathFromConfigWithFallback(const std::string& name,
     {
     }
 
-    return value.empty() ? getPathFromConfig(fallbackName) : value;
+    if (!value.empty())
+        return value;
+
+    return getPathFromConfig(fallbackName);
 }
 
 /// Returns true if and only if the property with the given key exists.
@@ -319,3 +322,5 @@ inline bool hasProperty(const std::string& key)
 }
 
 } // namespace ConfigUtil
+
+/* vim:set shiftwidth=4 softtabstop=4 expandtab: */

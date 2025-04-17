@@ -53,10 +53,10 @@ L.Map = L.Evented.extend({
 	// Control.UIManager instance, set in main.js
 	uiManager: null,
 
-	// Control.LokDialog instance, is set in Control.UIManager.js
+	// Control.LokDialog instance, is set in Control.UIManager.ts
 	dialog: null,
 
-	// Control.JSDialog instance, is set in Control.UIManager.js
+	// Control.JSDialog instance, is set in Control.UIManager.ts
 	jsdialog: null,
 
 	context: {context: ''},
@@ -114,7 +114,7 @@ L.Map = L.Evented.extend({
 		// Focusing:
 		//
 		// Cursor is visible or hidden (e.g. for graphic selection).
-		app.file.textCursor.visible = true;
+		app.setCursorVisibility(true);
 		// The ID of the window with focus. 0 for the document.
 		this._winId = 0;
 		// The object of the dialog, if any (must have .focus callable).
@@ -142,7 +142,7 @@ L.Map = L.Evented.extend({
 
 		this._progressBar = L.progressOverlay(new L.point(150, 25));
 
-		this._debug = new L.DebugManager(this);
+		this._debug = new app.DebugManager(this);
 		this.on('docloaded', function() {
 			if (this.options.debug && !this._debug.debugOn) {
 				this._debug.toggle();

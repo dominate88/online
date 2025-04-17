@@ -11,6 +11,9 @@
 
 #include <config.h>
 #include <config_version.h>
+#ifdef __linux__
+#include <malloc.h>
+#endif
 
 #include "COOLWSD.hpp"
 
@@ -106,7 +109,7 @@
 #include <common/FileUtil.hpp>
 #include <common/JailUtil.hpp>
 #include <common/Watchdog.hpp>
-#include <Log.hpp>
+#include <common/Log.hpp>
 #include <MobileApp.hpp>
 #include <Protocol.hpp>
 #include <Session.hpp>
@@ -115,11 +118,12 @@
 #endif
 #include <wsd/wopi/StorageConnectionManager.hpp>
 #include <wsd/TraceFile.hpp>
-#include <Unit.hpp>
-#include <Util.hpp>
 #include <common/ConfigUtil.hpp>
-
+#include <common/HexUtil.hpp>
 #include <common/SigUtil.hpp>
+#include <common/Unit.hpp>
+#include <common/Util.hpp>
+
 #include <net/AsyncDNS.hpp>
 
 #include <ServerSocket.hpp>
@@ -218,11 +222,11 @@ void COOLWSD::appendAllowedHostsFrom(LayeredConfiguration& conf, const std::stri
         {
             break;
         }
-        const std::string host = ConfigUtil::getConfigValue<std::string>(conf, path, "");
+        std::string host = ConfigUtil::getConfigValue<std::string>(conf, path, "");
         if (!host.empty())
         {
             LOG_INF_S("Adding trusted LOK_ALLOW host: [" << host << ']');
-            allowed.push_back(host);
+            allowed.push_back(std::move(host));
         }
     }
 }
@@ -287,7 +291,7 @@ void COOLWSD::appendAllowedAliasGroups(LayeredConfiguration& conf, std::vector<s
         if (!host.empty())
         {
             LOG_INF_S("Adding trusted LOK_ALLOW host: [" << host << ']');
-            allowed.push_back(host);
+            allowed.push_back(std::move(host));
         }
 
         for (size_t j = 0;; j++)
@@ -443,11 +447,15 @@ void cleanupDocBrokers()
     {
         std::shared_ptr<DocumentBroker> docBroker = it->second;
 
+        // Time out DocBrokers that never loaded
+        docBroker->timeoutNotLoaded(now);
+
         // Remove only when not alive.
         if (!docBroker->isAlive())
         {
             LastSubForKitBrokerExitTimes[docBroker->getConfigId()] = now;
-            LOG_INF("Removing DocumentBroker for docKey [" << it->first << "].");
+            LOG_INF("Removing DocumentBroker for docKey ["
+                    << it->first << "], " << docBroker.use_count() << " references");
             docBroker->dispose();
             it = DocBrokers.erase(it);
             continue;
@@ -721,7 +729,7 @@ inline std::string getLaunchURI(const std::string &document, bool readonly = fal
     oss << COOLWSD_TEST_COOL_UI;
     oss << "?file_path=";
     oss << DEBUG_ABSSRCDIR "/";
-    oss << document;
+    oss << Uri::encode(document);
     if (readonly)
         oss << "&permission=readonly";
 
@@ -1400,8 +1408,11 @@ void COOLWSD::innerInitialize(Poco::Util::Application& self)
         {
             setenv("COOL_LOGFILE", "1", true);
             setenv("COOL_LOGFILENAME", it->second.c_str(), true);
-            std::cerr << "\nLogging at " << LogLevel << " level to file: " << it->second.c_str()
-                      << std::endl;
+            if (!CleanupOnly)
+            {
+                std::cerr << "\nLogging at " << LogLevel << " level to file: " << it->second.c_str()
+                    << std::endl;
+            }
         }
     }
 
@@ -1432,7 +1443,10 @@ void COOLWSD::innerInitialize(Poco::Util::Application& self)
         {
             setenv("COOL_LOGFILE_UICMD", "1", true);
             setenv("COOL_LOGFILENAME_UICMD", it->second.c_str(), true);
-            std::cerr << "\nLogging UI Commands to file: " << it->second.c_str() << std::endl;
+            if (!CleanupOnly)
+            {
+                std::cerr << "\nLogging UI Commands to file: " << it->second.c_str() << std::endl;
+            }
         }
         const bool merge = ConfigUtil::getConfigValue<bool>(conf, "logging_ui_cmd.merge", true);
         const bool logEndtime =
@@ -1793,25 +1807,8 @@ void COOLWSD::innerInitialize(Poco::Util::Application& self)
                 LOG_WRN("Quarantine path is relative. Please use an absolute path for better "
                         "reliability");
 
-            Poco::File p(path);
-            try
-            {
-                LOG_TRC("Creating quarantine directory [" + path << ']');
-                p.createDirectories();
-
-                LOG_DBG("Created quarantine directory [" + path << ']');
-            }
-            catch (const std::exception& ex)
-            {
-                LOG_WRN("Failed to create quarantine directory [" << path
-                                                                  << "]. Disabling quaratine");
-            }
-
-            if (FileUtil::Stat(path).exists())
-            {
-                LOG_INF("Initializing quarantine at [" + path << ']');
-                Quarantine::initialize(path);
-            }
+            LOG_DBG("Initializing quarantine at [" + path << ']');
+            Quarantine::initialize(path);
         }
     }
     else
@@ -2064,10 +2061,10 @@ void COOLWSD::innerInitialize(Poco::Util::Application& self)
         for (size_t i = 0; ; ++i)
         {
             const std::string confPath = "trace.filter.message[" + std::to_string(i) + ']';
-            const std::string regex = config().getString(confPath, "");
+            std::string regex = config().getString(confPath, "");
             if (!regex.empty())
             {
-                filters.push_back(regex);
+                filters.push_back(std::move(regex));
             }
             else if (!config().has(confPath))
             {
@@ -2968,7 +2965,7 @@ private:
 
 #ifdef LOG_SOCKET_DATA
         LOG_TRC("HandleIncomingMessage: buffer has:\n"
-                << Util::dumpHex(std::string(data.data(), std::min(data.size(), 256UL))));
+                << HexUtil::dumpHex(std::string(data.data(), std::min(data.size(), 256UL))));
 #endif
 
         // Consume the incoming data by parsing and processing the body.
@@ -3224,8 +3221,6 @@ class COOLWSDServer
 {
     COOLWSDServer(COOLWSDServer&& other) = delete;
     const COOLWSDServer& operator=(COOLWSDServer&& other) = delete;
-    // allocate port & hold temporarily.
-    std::shared_ptr<ServerSocket> _serverSocket;
 public:
     COOLWSDServer()
         : _acceptPoll("accept_poll")
@@ -3240,9 +3235,9 @@ public:
         stop();
     }
 
-    void findClientPort()
+    std::shared_ptr<ServerSocket> findClientPort()
     {
-        _serverSocket = findServerPort();
+        return findServerPort();
     }
 
     void startPrisoners()
@@ -3256,16 +3251,15 @@ public:
         PrisonerPoll->joinThread();
     }
 
-    void start()
+    void start(std::shared_ptr<ServerSocket>&& serverSocket)
     {
         _acceptPoll.startThread();
-        _acceptPoll.insertNewSocket(_serverSocket);
+        _acceptPoll.insertNewSocket(std::move(serverSocket));
 
 #if MOBILEAPP
-        coolwsd_server_socket_fd = _serverSocket->getFD();
+        coolwsd_server_socket_fd = serverSocket->getFD();
 #endif
 
-        _serverSocket.reset();
         WebServerPoll->startThread();
 
 #if !MOBILEAPP
@@ -3286,8 +3280,7 @@ public:
     void dumpState(std::ostream& os) const
     {
         // FIXME: add some stop-world magic before doing the dump(?)
-        Socket::InhibitThreadChecks = true;
-        SocketPoll::InhibitThreadChecks = true;
+        ThreadChecks::Inhibit = true;
 
         std::string version, hash;
         Util::getVersionInfo(version, hash);
@@ -3345,7 +3338,7 @@ public:
         if (const ssize_t size = FileUtil::readFile("/proc/self/smaps_rollup", smap); size <= 0)
             os << "\n  smaps_rollup: <unavailable>";
         else
-            os << "\n  smaps_rollup: " << smap;
+            os << "\n  smaps_rollup: " << Util::replace(std::move(smap), "\n", "\n\t");
 
 #if !MOBILEAPP
         if (FetchHttpSession)
@@ -3382,7 +3375,7 @@ public:
         COOLWSD::SavedClipboards->dumpState(os);
 
         os << '\n';
-        FileServerRequestHandler::dumpState(os);
+        COOLWSD::FileRequestHandler->dumpState(os);
 #endif
 
         os << "\nDocument Broker polls " << "[ " << DocBrokers.size() << " ]:\n";
@@ -3395,8 +3388,7 @@ public:
 
         os << "\nDone COOLWSDServer state dumping.\n";
 
-        Socket::InhibitThreadChecks = false;
-        SocketPoll::InhibitThreadChecks = false;
+        ThreadChecks::Inhibit = false;
     }
 
 private:
@@ -3425,7 +3417,7 @@ private:
         auto socket = std::make_shared<LocalServerSocket>(
                         std::chrono::steady_clock::now(), *PrisonerPoll, factory);
 
-        const std::string location = socket->bind();
+        std::string location = socket->bind();
         if (!location.length())
         {
             LOG_FTL("Failed to create local unix domain socket. Exiting.");
@@ -3440,7 +3432,7 @@ private:
         }
 
         LOG_INF("Listening to prisoner connections on " << location);
-        MasterLocation = location;
+        MasterLocation = std::move(location);
 #ifndef HAVE_ABSTRACT_UNIX_SOCKETS
         if(!socket->link(COOLWSD::SysTemplate + "/0" + MasterLocation))
         {
@@ -3517,7 +3509,7 @@ private:
 };
 
 #if !MOBILEAPP
-void COOLWSD::processFetchUpdate(SocketPoll& poll)
+void COOLWSD::processFetchUpdate(const std::shared_ptr<SocketPoll>& poll)
 {
     try
     {
@@ -3600,8 +3592,8 @@ int COOLWSD::innerMain()
 
 #if !MOBILEAPP
     // Fetch remote settings from server if configured
-    RemoteConfigPoll remoteConfigThread(config());
-    remoteConfigThread.start();
+    std::shared_ptr<RemoteConfigPoll> remoteConfigThread(std::make_shared<RemoteConfigPoll>(config()));
+    remoteConfigThread->start();
 #endif
 
 #ifndef IOS
@@ -3652,7 +3644,8 @@ int COOLWSD::innerMain()
 
     // Allocate our port - passed to prisoners.
     assert(Server && "The COOLWSDServer instance does not exist.");
-    Server->findClientPort();
+    // allocate port & hold temporarily.
+    std::shared_ptr<ServerSocket> serverPort = Server->findClientPort();
 
     TmpFontDir = ChildRoot + JailUtil::CHILDROOT_TMP_INCOMING_PATH;
 
@@ -3732,7 +3725,7 @@ int COOLWSD::innerMain()
     Anonymizer::mapAnonymized("contents", "contents");
 
     // Start the server.
-    Server->start();
+    Server->start(std::move(serverPort));
 
 #if WASMAPP
     // It is not at all obvious that this is the ideal place to do the HULLO thing and call onopen
@@ -3742,7 +3735,8 @@ int COOLWSD::innerMain()
 #endif
 
     /// The main-poll does next to nothing:
-    SocketPoll mainWait("main");
+    std::shared_ptr<SocketPoll> mainWait = std::make_shared<SocketPoll>("main");
+    mainWait->runOnClientThread();
 
     SigUtil::addActivity("coolwsd accepting connections");
 
@@ -3797,9 +3791,14 @@ int COOLWSD::innerMain()
     if (ConfigUtil::getConfigValue<bool>("stop_on_config_change", false))
     {
         std::shared_ptr<InotifySocket> inotifySocket = std::make_shared<InotifySocket>(startStamp);
-        mainWait.insertNewSocket(inotifySocket);
+        mainWait->insertNewSocket(inotifySocket);
     }
 #endif
+#endif
+
+#if defined(M_TRIM_THRESHOLD)
+    LOG_DBG("trimming memory post startup");
+    malloc_trim(0);
 #endif
 
     SigUtil::addActivity("coolwsd running");
@@ -3819,10 +3818,16 @@ int COOLWSD::innerMain()
             waitMicroS /= 4;
         }
 
-        mainWait.poll(waitMicroS);
+        mainWait->poll(waitMicroS);
 
         // Wake the prisoner poll to spawn some children, if necessary.
         PrisonerPoll->wakeup();
+
+        if (SigUtil::getShutdownRequestFlag())
+        {
+            // The code below can be unsafe as other threads start shutting down.
+            break;
+        }
 
         const auto timeNow = std::chrono::steady_clock::now();
         const std::chrono::milliseconds timeSinceStartMs
@@ -3834,7 +3839,7 @@ int COOLWSD::innerMain()
         }
 
 #if !MOBILEAPP
-        SavedClipboards->checkexpiry();
+        SavedClipboards->checkexpiry(timeNow);
 
         const std::chrono::milliseconds durationFetch
             = std::chrono::duration_cast<std::chrono::milliseconds>(timeNow - stampFetch);
@@ -3930,8 +3935,7 @@ int COOLWSD::innerMain()
     }
 
     // Disable thread checking - we'll now cleanup lots of things if we can
-    Socket::InhibitThreadChecks = true;
-    SocketPoll::InhibitThreadChecks = true;
+    ThreadChecks::Inhibit = true;
 
     // Wait for the DocumentBrokers. They must be saving/uploading now.
     // Do not stop them! Otherwise they might not save/upload the document.
@@ -4064,8 +4068,7 @@ void COOLWSD::cleanup([[maybe_unused]] int returnValue)
 
         TraceDumper.reset();
 
-        Socket::InhibitThreadChecks = true;
-        SocketPoll::InhibitThreadChecks = true;
+        ThreadChecks::Inhibit = true;
 
         // Delete these while the static Admin instance is still alive.
         {
@@ -4232,12 +4235,13 @@ void forwardSignal(const int signum);
 
 void dump_state()
 {
-    std::ostringstream oss;
+    std::ostringstream oss(Util::makeDumpStateStream());
 
     if (Server)
         Server->dumpState(oss);
 
-    oss << "\nMalloc info [" << getpid() << "]: \n" << Util::getMallocInfo() << '\n';
+    oss << "\nMalloc info [" << getpid() << "]: \n\t"
+        << Util::replace(Util::getMallocInfo(), "\n", "\n\t") << '\n';
 
     const std::string msg = oss.str();
     fprintf(stderr, "%s\n", msg.c_str());

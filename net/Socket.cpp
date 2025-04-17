@@ -12,8 +12,26 @@
 #include "config.h"
 
 #include "Socket.hpp"
-#include "TraceEvent.hpp"
-#include "Util.hpp"
+
+#include <common/ConfigUtil.hpp>
+#include <common/HexUtil.hpp>
+#include <common/Log.hpp>
+#include <common/SigUtil.hpp>
+#include <common/TraceEvent.hpp>
+#include <common/Unit.hpp>
+#include <common/Util.hpp>
+#include <common/Util.hpp>
+#include <common/Watchdog.hpp>
+#include <net/HttpRequest.hpp>
+#include <net/NetUtil.hpp>
+#include <net/ServerSocket.hpp>
+#include <net/WebSocketHandler.hpp>
+#include <wasm/base64.hpp>
+
+#if !MOBILEAPP && ENABLE_SSL
+#include <net/SslSocket.hpp>
+#include <openssl/x509v3.h>
+#endif
 
 #include <cerrno>
 #include <chrono>
@@ -45,28 +63,14 @@
 #include <Poco/Net/X509Certificate.h>
 #endif
 
-#include <SigUtil.hpp>
-#include "ServerSocket.hpp"
-#if !MOBILEAPP && ENABLE_SSL
-#include <net/SslSocket.hpp>
-#include <openssl/x509v3.h>
-#endif
-#include "WebSocketHandler.hpp"
-#include <net/HttpRequest.hpp>
-#include <NetUtil.hpp>
-#include <Log.hpp>
-#include <Watchdog.hpp>
-#include <wasm/base64.hpp>
-#include <common/ConfigUtil.hpp>
-#include <common/Unit.hpp>
-#include <common/Util.hpp>
-
 // Bug in pre C++17 where static constexpr must be defined. Fixed in C++17.
 constexpr std::chrono::microseconds SocketPoll::DefaultPollTimeoutMicroS;
 constexpr std::chrono::microseconds WebSocketHandler::InitialPingDelayMicroS;
 
-std::atomic<bool> SocketPoll::InhibitThreadChecks(false);
-std::atomic<bool> Socket::InhibitThreadChecks(false);
+namespace ThreadChecks
+{
+    std::atomic<bool> Inhibit(false);
+}
 
 std::unique_ptr<Watchdog> SocketPoll::PollWatchdog;
 
@@ -113,7 +117,8 @@ int Socket::createSocket([[maybe_unused]] Socket::Type type)
 #endif
 }
 
-std::ostream& Socket::streamStats(std::ostream& os, const std::chrono::steady_clock::time_point &now) const
+std::ostream& Socket::streamStats(std::ostream& os,
+                                  const std::chrono::steady_clock::time_point now) const
 {
     const auto durTotal = std::chrono::duration_cast<std::chrono::milliseconds>(now - _creationTime);
     const auto durLast = std::chrono::duration_cast<std::chrono::milliseconds>(now - _lastSeenTime);
@@ -141,7 +146,7 @@ std::ostream& Socket::streamStats(std::ostream& os, const std::chrono::steady_cl
     return os;
 }
 
-std::string Socket::getStatsString(const std::chrono::steady_clock::time_point &now) const
+std::string Socket::getStatsString(const std::chrono::steady_clock::time_point now) const
 {
     std::ostringstream oss;
     streamStats(oss, now);
@@ -164,7 +169,7 @@ std::string Socket::toStringImpl() const
 
 #if !MOBILEAPP
 
-bool StreamSocket::socketpair(const std::chrono::steady_clock::time_point &creationTime,
+bool StreamSocket::socketpair(const std::chrono::steady_clock::time_point creationTime,
                               std::shared_ptr<StreamSocket>& parent,
                               std::shared_ptr<StreamSocket>& child)
 {
@@ -333,7 +338,7 @@ SocketPoll::~SocketPoll()
 
 void SocketPoll::checkAndReThread()
 {
-    if (InhibitThreadChecks)
+    if (ThreadChecks::Inhibit)
         return; // in late shutdown
     const std::thread::id us = std::this_thread::get_id();
     if (_owner == us)
@@ -343,7 +348,7 @@ void SocketPoll::checkAndReThread()
     _owner = us;
     _ownerThreadId = Util::getThreadId();
     for (const auto& it : _pollSockets)
-        it->setThreadOwner(us);
+        SocketThreadOwnerChange::setThreadOwner(*it, us);
     // _newSockets are adapted as they are inserted.
 }
 
@@ -522,6 +527,13 @@ int SocketPoll::poll(int64_t timeoutMaxMicroS, bool justPoll)
     LOGA_TRC(Socket, "Poll completed with " << rc << " live polls max (" <<
              timeoutMaxMicroS << "us)" << ((rc==0) ? "(timedout)" : ""));
 
+    if (rc == 0)
+    {
+        // We timed out. Flush the thread-local log
+        // buffer to avoid falling too much behind.
+        Log::flush();
+    }
+
     // from now we want to race back to sleep.
     enableWatchdog();
 
@@ -568,7 +580,7 @@ int SocketPoll::poll(int64_t timeoutMaxMicroS, bool justPoll)
 
                 // Update thread ownership.
                 for (auto& i : _newSockets)
-                    i->setThreadOwner(std::this_thread::get_id());
+                    SocketThreadOwnerChange::setThreadOwner(*i, std::this_thread::get_id());
 
                 // Copy the new sockets over and clear.
                 _pollSockets.insert(_pollSockets.end(), _newSockets.begin(), _newSockets.end());
@@ -758,7 +770,7 @@ void SocketPoll::takeSocket(const std::shared_ptr<SocketPoll> &fromPoll,
             LOG_WRN("Trying to move socket out of the wrong poll");
 
         // sockets in transit are un-owned
-        socket->resetThreadOwner();
+        SocketThreadOwnerChange::resetThreadOwner(*socket);
 
         toPoll->insertNewSocket(socket);
 
@@ -813,7 +825,7 @@ void SocketPoll::removeSockets()
 
         LOG_DBG("Removing socket #" << socket->getFD() << " from " << _name);
         ASSERT_CORRECT_SOCKET_THREAD(socket);
-        socket->resetThreadOwner();
+        SocketThreadOwnerChange::resetThreadOwner(*socket);
 
         _pollSockets.pop_back();
     }
@@ -986,15 +998,18 @@ void SocketDisposition::execute()
     if (_socketMove)
     {
         // Drop pretentions of ownership before _socketMove.
-        _socket->resetThreadOwner();
+        SocketThreadOwnerChange::resetThreadOwner(*_socket);
 
         if (!_toPoll) {
             assert (isMove());
             _socketMove(_socket);
         } else {
             assert (isTransfer());
-            // Ensure the thread is running before adding callback.
-            _toPoll->startThread();
+            if (!_toPoll->isRunOnClientThread())
+            {
+                // Ensure the thread is running before adding callback.
+                _toPoll->startThread();
+            }
             _toPoll->addCallback([pollCopy = _toPoll, socket = _socket, socketMoveFn = std::move(_socketMove)]()
                 {
                     pollCopy->insertNewSocket(socket);
@@ -1013,7 +1028,7 @@ void WebSocketHandler::dumpState(std::ostream& os, const std::string& indent) co
     os << std::setw(5) << _pingTimeUs/1000. << "ms ";
 #endif
     if (_wsPayload.size() > 0)
-        Util::dumpHex(os, _wsPayload, "\t\tws queued payload:\n", "\t\t");
+        HexUtil::dumpHex(os, _wsPayload, "\t\tws queued payload:\n", "\t\t");
     os << '\n';
     if (_msgHandler)
     {
@@ -1036,7 +1051,7 @@ void StreamSocket::dumpState(std::ostream& os)
        << bytesRcvd() << "\t w: " << std::setw(6) << bytesSent() << '\t' << clientAddress() << '\t';
     _socketHandler->dumpState(os);
     if (_inBuffer.size() > 0)
-        Util::dumpHex(os, _inBuffer, "\t\tinBuffer:\n", "\t\t");
+        HexUtil::dumpHex(os, _inBuffer, "\t\tinBuffer:\n", "\t\t");
     _outBuffer.dumpHex(os, "\t\toutBuffer:\n", "\t\t");
 }
 
@@ -1085,14 +1100,20 @@ void SocketPoll::dumpState(std::ostream& os) const
     os << "\n  SocketPoll [" << name() << "] with " << pollSockets.size() << " socket"
        << (pollSockets.size() == 1 ? "" : "s") << " - wakeup rfd: " << _wakeup[0]
        << " wfd: " << _wakeup[1] << '\n';
-    const auto callbacks = _newCallbacks.size();
-    if (callbacks > 0)
-        os << "\tcallbacks: " << callbacks << '\n';
+
+    os << "\tcallbacks: " << _newCallbacks.size() << '\n';
+
     os << "\t\tfd\tevents\tstatus\trbuffered\trcapacity\twbuffered\twcapacity\trtotal\twtotal\tclie"
           "ntaddress\n";
+    std::size_t totalCapacity = 0;
     for (const std::shared_ptr<Socket>& socket : pollSockets)
+    {
         socket->dumpState(os);
-    os << "\n  Done [" << name() << "]\n";
+        totalCapacity += socket->totalBufferCapacity();
+    }
+
+    os << "\n  Total socket buffer capacity: " << totalCapacity / 1024 << " KB\n";
+    os << "\n  Done SocketPoll [" << name() << "]\n";
     THREAD_UNSAFE_DUMP_END
 }
 
@@ -1519,10 +1540,9 @@ bool StreamSocket::checkRemoval(std::chrono::steady_clock::time_point now)
 
 #if !MOBILEAPP
 
-bool StreamSocket::parseHeader(const char *clientName,
-                               Poco::MemoryInputStream &message,
-                               Poco::Net::HTTPRequest &request,
-                               std::chrono::steady_clock::time_point &lastHTTPHeader,
+bool StreamSocket::parseHeader(const char* clientName, Poco::MemoryInputStream& message,
+                               Poco::Net::HTTPRequest& request,
+                               std::chrono::steady_clock::time_point lastHTTPHeader,
                                MessageMap& map)
 {
     assert(map._headerSize == 0 && map._messageSize == 0);
@@ -1603,7 +1623,7 @@ bool StreamSocket::parseHeader(const char *clientName,
                 size_t chunkLen = 0;
                 for (; itBody != _inBuffer.end(); ++itBody)
                 {
-                    int digit = Util::hexDigitFromChar(*itBody);
+                    int digit = HexUtil::hexDigitFromChar(*itBody);
                     if (digit >= 0)
                         chunkLen = chunkLen * 16 + digit;
                     else
@@ -1643,14 +1663,15 @@ bool StreamSocket::parseHeader(const char *clientName,
                 if (*itBody != '\r' || *(itBody + 1) != '\n')
                 {
                     LOG_ERR("parseHeader: Missing \\r\\n at end of chunk " << chunk << " of length " << chunkLen << ", delay " << delayMs.count() << "ms");
-                    LOG_CHUNK("Chunk " << chunk << " is: \n" << Util::dumpHex("", "", chunkStart, itBody + 1, false));
+                    LOG_CHUNK("Chunk " << chunk << " is: \n"
+                                       << HexUtil::dumpHex("", "", chunkStart, itBody + 1, false));
                     shutdown();
                     return false; // TODO: throw something sensible in this case
                 }
 
                 LOG_CHUNK("parseHeader: Chunk "
                           << chunk << " is: \n"
-                          << Util::dumpHex("", "", chunkStart, itBody + 1, false));
+                          << HexUtil::dumpHex("", "", chunkStart, itBody + 1, false));
 
                 itBody+=2;
                 chunk++;
@@ -1727,8 +1748,9 @@ bool StreamSocket::compactChunks(MessageMap& map)
     if (!map._spans.size())
         return false; // single message.
 
-    LOG_CHUNK("Pre-compact " << map._spans.size() << " chunks: \n" <<
-              Util::dumpHex("", "", _inBuffer.begin(), _inBuffer.end(), false));
+    LOG_CHUNK(
+        "Pre-compact " << map._spans.size() << " chunks: \n"
+                       << HexUtil::dumpHex("", "", _inBuffer.begin(), _inBuffer.end(), false));
 
     char *first = _inBuffer.data();
     char *dest = first;
@@ -1743,14 +1765,15 @@ bool StreamSocket::compactChunks(MessageMap& map)
     size_t gap = map._messageSize - newEnd;
     _inBuffer.erase(_inBuffer.begin() + newEnd, _inBuffer.begin() + map._messageSize);
 
-    LOG_CHUNK("Post-compact with erase of " << newEnd << " to " << map._messageSize << " giving: \n" <<
-              Util::dumpHex("", "", _inBuffer.begin(), _inBuffer.end(), false));
+    LOG_CHUNK("Post-compact with erase of "
+              << newEnd << " to " << map._messageSize << " giving: \n"
+              << HexUtil::dumpHex("", "", _inBuffer.begin(), _inBuffer.end(), false));
 
     // shrink our size to fit
     map._messageSize -= gap;
 
 #if ENABLE_DEBUG
-    std::ostringstream oss;
+    std::ostringstream oss(Util::makeDumpStateStream());
     dumpState(oss);
     LOG_TRC("Socket state: " << oss.str());
 #endif

@@ -29,14 +29,14 @@ namespace cool {
 
 		availableCountries: Array<Country>;
 
-		defaultCountryCode: string;
+		defaultCountryCode: string = '';
 
-		defaultProviderId: string;
+		defaultProviderId: string = '';
 
 		availableProviders: Array<SignatureProvider>;
 
 		// Providers available in the selected country
-		filteredProviders: Array<SignatureProvider>;
+		filteredProviders: Array<SignatureProvider> = [];
 
 		constructor(
 			countries: Array<Country>,
@@ -207,7 +207,7 @@ namespace cool {
 			eventType: string,
 			object: any,
 			data: any,
-			builder: any,
+			builder: JSBuilder,
 		) {
 			if (eventType === 'response' || object.id === 'ok') {
 				const providers = <HTMLSelectElement>(

@@ -118,7 +118,7 @@ using JsonUtil::makePropertyValue;
 
 extern "C" { void dump_kit_state(void); /* easy for gdb */ }
 
-#ifdef IOS
+#if MOBILEAPP
 extern std::map<std::string, std::shared_ptr<DocumentBroker>> DocBrokers;
 extern std::mutex DocBrokersMutex;
 #endif
@@ -1604,7 +1604,7 @@ void Document::reapZombieChildren()
     /// Here, we reap any zombies that might exist--at most 1.
     for (;;)
     {
-        const auto [ret, sig] = SigUtil::reapZombieChild(-1);
+        const auto [ret, sig] = SigUtil::reapZombieChild(-1, /*sighandler=*/false);
         if (ret <= 0)
         {
             break;
@@ -1762,11 +1762,11 @@ void Document::invalidateCanonicalId(const std::string& sessionId)
     if (newCanonicalId == session->getCanonicalViewId())
         return;
     session->setCanonicalViewId(newCanonicalId);
-    const std::string viewRenderedState = session->getViewRenderState();
+    std::string viewRenderedState = session->getViewRenderState();
     std::string stateName;
     if (!viewRenderedState.empty())
     {
-        stateName = viewRenderedState;
+        stateName = std::move(viewRenderedState);
     }
     else
     {
@@ -1967,8 +1967,8 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
             Poco::URI pocoUri(uri), templateUri(docTemplate);
             Poco::Path newPath(pocoUri.getPath()), templatePath(templateUri.getPath());
             newPath.setExtension(templatePath.getExtension());
-
-            rename(pocoUri.getPath().c_str(), newPath.toString().c_str());
+            if (::rename(pocoUri.getPath().c_str(), newPath.toString().c_str()) < 0)
+                LOG_SYS("Failed to rename [" << pocoUri.getPath() << "] to [" << newPath.toString() << ']');
             pocoUri.setPath(newPath.toString());
             loadUri = pocoUri.toString();
         }
@@ -1985,6 +1985,12 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
         _loKitDocument.reset(_loKit->documentLoad(pURL, options.c_str()));
 #ifdef __ANDROID__
         _loKitDocumentForAndroidOnly = _loKitDocument;
+        {
+            std::unique_lock<std::mutex> docBrokersLock(DocBrokersMutex);
+            auto docBrokerIt = DocBrokers.find(_docKey);
+            assert(docBrokerIt != DocBrokers.end());
+            _documentBrokerForAndroidOnly = docBrokerIt->second;
+        }
 #endif
         const auto duration = std::chrono::steady_clock::now() - start;
         const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(duration);
@@ -2654,7 +2660,6 @@ void Document::flushAndExit(int code)
 void Document::dumpState(std::ostream& oss)
 {
     oss << "Kit Document:\n"
-        << std::boolalpha
         << "\n\tpid: " << getpid()
         << "\n\tstop: " << _stop
         << "\n\tjailId: " << _jailId
@@ -2680,7 +2685,7 @@ void Document::dumpState(std::ostream& oss)
     if (const ssize_t size = FileUtil::readFile("/proc/self/smaps_rollup", smap); size <= 0)
         oss << "\n\tsmaps_rollup: <unavailable>";
     else
-        oss << "\n\tsmaps_rollup: " << smap;
+        oss << "\n\tsmaps_rollup: " << Util::replace(std::move(smap), "\n", "\n\t");
     oss << '\n';
 
     // dumpState:
@@ -2824,10 +2829,16 @@ void flushTraceEventRecordings()
 #ifdef __ANDROID__
 
 std::shared_ptr<lok::Document> Document::_loKitDocumentForAndroidOnly = std::shared_ptr<lok::Document>();
+std::weak_ptr<DocumentBroker> Document::_documentBrokerForAndroidOnly;
 
 std::shared_ptr<lok::Document> getLOKDocumentForAndroidOnly()
 {
     return Document::_loKitDocumentForAndroidOnly;
+}
+
+std::shared_ptr<DocumentBroker> getDocumentBrokerForAndroidOnly()
+{
+    return Document::_documentBrokerForAndroidOnly.lock();
 }
 
 #endif
@@ -3169,7 +3180,7 @@ extern "C"
     static void sigChildHandler(int pid)
     {
         // Reap the child; will log failures.
-        SigUtil::reapZombieChild(pid);
+        SigUtil::reapZombieChild(pid, /*sighandler=*/true);
     }
 }
 
@@ -4038,13 +4049,11 @@ bool startURP(const std::shared_ptr<lok::Office>& LOKit, void** ppURPContext)
 /// Initializes LibreOfficeKit for cross-fork re-use.
 bool globalPreinit(const std::string &loTemplate)
 {
-    const std::string libSofficeapp = loTemplate + "/program/libsofficeapp.so";
-    const std::string libMerged = loTemplate + "/program/libmergedlo.so";
-
     std::string loadedLibrary;
     // we deliberately don't dlclose handle on success, make it
     // static so static analysis doesn't see this as a leak
     static void *handle;
+    std::string libMerged = loTemplate + "/program/libmergedlo.so";
     if (File(libMerged).exists())
     {
         LOG_TRC("dlopen(" << libMerged << ", RTLD_GLOBAL|RTLD_NOW)");
@@ -4054,10 +4063,11 @@ bool globalPreinit(const std::string &loTemplate)
             LOG_FTL("Failed to load " << libMerged << ": " << dlerror());
             return false;
         }
-        loadedLibrary = libMerged;
+        loadedLibrary = std::move(libMerged);
     }
     else
     {
+        std::string libSofficeapp = loTemplate + "/program/libsofficeapp.so";
         if (File(libSofficeapp).exists())
         {
             LOG_TRC("dlopen(" << libSofficeapp << ", RTLD_GLOBAL|RTLD_NOW)");
@@ -4067,7 +4077,7 @@ bool globalPreinit(const std::string &loTemplate)
                 LOG_FTL("Failed to load " << libSofficeapp << ": " << dlerror());
                 return false;
             }
-            loadedLibrary = libSofficeapp;
+            loadedLibrary = std::move(libSofficeapp);
         }
         else
         {
@@ -4133,10 +4143,11 @@ std::string anonymizeUsername(const std::string& username)
 
 void dump_kit_state()
 {
-    std::ostringstream oss;
+    std::ostringstream oss(Util::makeDumpStateStream());
     KitSocketPoll::dumpGlobalState(oss);
 
-    oss << "\nMalloc info [" << getpid() << "]: \n" << Util::getMallocInfo() << '\n';
+    oss << "\nMalloc info [" << getpid() << "]: \n\t"
+        << Util::replace(Util::getMallocInfo(), "\n", "\n\t") << '\n';
 
     const std::string msg = oss.str();
     fprintf(stderr, "%s", msg.c_str());
