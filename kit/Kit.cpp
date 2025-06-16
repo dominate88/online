@@ -18,22 +18,31 @@
 #include <common/Anonymizer.hpp>
 
 #include <csignal>
-#include <dlfcn.h>
 #include <limits>
+
+#if !MOBILEAPP
+#include <dlfcn.h>
+#endif
+
 #ifdef __linux__
 #include <ftw.h>
 #include <sys/vfs.h>
 #include <linux/magic.h>
-#include <sys/capability.h>
 #include <sys/sysmacros.h>
 #endif
-#ifdef __FreeBSD__
+
+#if HAVE_LIBCAP
+#include <sys/capability.h>
+#endif
+
+#if defined(__FreeBSD__)
 #include <ftw.h>
 #define FTW_CONTINUE 0
 #define FTW_STOP (-1)
 #define FTW_SKIP_SUBTREE 0
 #define FTW_ACTIONRETVAL 0
 #endif
+
 #include <unistd.h>
 #include <utime.h>
 #include <sys/time.h>
@@ -54,6 +63,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 
 #define LOK_USE_UNSTABLE_API
 #include <LibreOfficeKit/LibreOfficeKitInit.h>
@@ -66,7 +76,6 @@
 #include <Common.hpp>
 #include <MobileApp.hpp>
 #include <FileUtil.hpp>
-#include <common/JailUtil.hpp>
 #include <common/JsonUtil.hpp>
 #include "KitHelper.hpp"
 #include "Kit.hpp"
@@ -81,15 +90,15 @@
 #include "RenderTiles.hpp"
 #include "KitWebSocket.hpp"
 #include <common/ConfigUtil.hpp>
-#include <common/TraceEvent.hpp>
-#include <common/Watchdog.hpp>
 #include <common/Uri.hpp>
 
 #if !MOBILEAPP
+#include <common/JailUtil.hpp>
 #include <common/security.h>
-#include <common/SigUtil.hpp>
 #include <common/Seccomp.hpp>
-#include <utility>
+#include <common/SigUtil.hpp>
+#include <common/TraceEvent.hpp>
+#include <common/Watchdog.hpp>
 #endif
 
 #if MOBILEAPP
@@ -177,6 +186,7 @@ bool pushToMainThread(LibreOfficeKitCallback cb, int type, const char *p, void *
 [[maybe_unused]]
 static LokHookFunction2* initFunction = nullptr;
 
+#if !MOBILEAPP
 class BackgroundSaveWatchdog
 {
 public:
@@ -217,6 +227,7 @@ public:
                       // handling SIGABRT, so instead after some time fall-back to this:
 
                       // raise(3) will exit the current thread, not the process.
+                      // coverity[sleep : SUPPRESS] - don't report sleep with lock held
                       sleep(30); // long enough for a trace ?
                       std::cerr << "BgSave failed to terminate after SIGABRT - will hard self-destroy process " << getpid() << std::endl;
                       ::kill(0, SIGKILL); // kill(2) is trapped by seccomp.
@@ -245,6 +256,8 @@ void Document::shutdownBackgroundWatchdog()
     if (BgSaveWatchdog)
         BgSaveWatchdog->complete();
 }
+
+#endif
 
 namespace
 {
@@ -496,8 +509,8 @@ namespace
             }
         }
 
-        assert(fpath[strlen(sourceForLinkOrCopy.c_str())] == '/');
-        const char *relativeOldPath = fpath + strlen(sourceForLinkOrCopy.c_str()) + 1;
+        assert(fpath[sourceForLinkOrCopy.size()] == '/');
+        const char* relativeOldPath = fpath + sourceForLinkOrCopy.size() + 1;
         const Poco::Path newPath(destinationForLinkOrCopy, Poco::Path(relativeOldPath));
 
         switch (typeflag)
@@ -571,7 +584,7 @@ namespace
         return FTW_CONTINUE;
     }
 
-    void linkOrCopy(std::string source, const Poco::Path& destination, const std::string& linkable,
+    void linkOrCopy(const std::string& source, const Poco::Path& destination, const std::string& linkable,
                     LinkOrCopyType type)
     {
         std::string resolved = FileUtil::realpath(source);
@@ -579,14 +592,13 @@ namespace
         {
             LOG_DBG("linkOrCopy: Using real path [" << resolved << "] instead of original link ["
                                                     << source << "].");
-            source = std::move(resolved);
         }
 
-        LOG_INF("linkOrCopy " << linkOrCopyTypeString(type) << " from [" << source << "] to ["
+        LOG_INF("linkOrCopy " << linkOrCopyTypeString(type) << " from [" << resolved << "] to ["
                               << destination.toString() << "].");
 
         linkOrCopyType = type;
-        sourceForLinkOrCopy = source;
+        sourceForLinkOrCopy = resolved;
         if (sourceForLinkOrCopy.back() == '/')
             sourceForLinkOrCopy.pop_back();
         destinationForLinkOrCopy = destination;
@@ -595,9 +607,9 @@ namespace
         linkOrCopyStartTime = std::chrono::steady_clock::now();
         forceInitialCopy = detectSlowStackingFileSystem(destination.toString());
 
-        if (nftw(source.c_str(), linkOrCopyFunction, 10, FTW_ACTIONRETVAL|FTW_PHYS) == -1)
+        if (nftw(resolved.c_str(), linkOrCopyFunction, 10, FTW_ACTIONRETVAL|FTW_PHYS) == -1)
         {
-            LOG_ERR("linkOrCopy: nftw() failed for '" << source << '\'');
+            LOG_ERR("linkOrCopy: nftw() failed for '" << resolved << '\'');
         }
 
         if (linkOrCopyVerboseLogging)
@@ -607,7 +619,7 @@ namespace
                 std::chrono::steady_clock::now() - linkOrCopyStartTime).count();
             const double seconds = (ms + 1) / 1000.; // At least 1ms to avoid div-by-zero.
             const auto rate = linkOrCopyFileCount / seconds;
-            LOG_INF("Linking/Copying of " << linkOrCopyFileCount << " files from " << source
+            LOG_INF("Linking/Copying of " << linkOrCopyFileCount << " files from " << resolved
                                           << " to " << destinationForLinkOrCopy.toString()
                                           << " finished in " << seconds << " seconds, or " << rate
                                           << " files / second.");
@@ -636,8 +648,8 @@ namespace
         }
 
         assert(path.size() >= sourceForGCDAFiles.size());
-        assert(fpath[strlen(sourceForGCDAFiles.c_str())] == '/');
-        const char* relativeOldPath = fpath + strlen(sourceForGCDAFiles.c_str()) + 1;
+        assert(fpath[sourceForGCDAFiles.size()] == '/');
+        const char* relativeOldPath = fpath + sourceForGCDAFiles.size() + 1;
         const Poco::Path newPath(destForGCDAFiles, Poco::Path(relativeOldPath));
 
         switch (typeflag)
@@ -714,7 +726,7 @@ namespace
     }
 #endif
 
-#ifndef __FreeBSD__
+#if HAVE_LIBCAP
     void dropCapability(cap_value_t capability)
     {
         cap_t caps;
@@ -763,12 +775,13 @@ Document::Document(const std::shared_ptr<lok::Office>& loKit, const std::string&
     , _docKey(docKey)
     , _docId(docId)
     , _url(url)
-    , _obfuscatedFileId(Uri::getFilenameFromURL(docKey))
+    , _obfuscatedFileId(Uri::getFilenameFromURL(Uri::decode(docKey)))
     , _queue(new KitQueue(*this))
     , _websocketHandler(websocketHandler)
     , _modified(ModifiedState::UnModified)
     , _isBgSaveProcess(false)
     , _isBgSaveDisabled(false)
+    , _trimIfInactivePostponed(false)
     , _haveDocPassword(false)
     , _isDocPasswordProtected(false)
     , _docPasswordType(DocumentPasswordType::ToView)
@@ -779,6 +792,7 @@ Document::Document(const std::shared_ptr<lok::Office>& loKit, const std::string&
     , _lastMemTrimTime(std::chrono::steady_clock::now())
     , _mobileAppDocId(mobileAppDocId)
     , _duringLoad(0)
+    , _bgSavesOngoing(0)
 {
     LOG_INF("Document ctor for [" << _docKey <<
             "] url [" << anonymizeUrl(_url) << "] on child [" << _jailId <<
@@ -919,11 +933,13 @@ std::size_t Document::purgeSessions()
         }
 
         num_sessions = _sessions.size();
-        if (!Util::isMobileApp() && num_sessions == 0)
+#if !MOBILEAPP
+        if (num_sessions == 0)
         {
             LOG_FTL("Document [" << anonymizeUrl(_url) << "] has no more views, exiting bluntly.");
             flushAndExit(EX_OK);
         }
+#endif
     }
 
     if (deadSessions.size() > 0 )
@@ -1031,11 +1047,30 @@ bool Document::sendFrame(const char* buffer, int length, WSOpCode opCode)
     return false;
 }
 
+void Document::bgSaveEnded()
+{
+    _bgSavesOngoing--;
+    if (!_bgSavesOngoing)
+    {
+        // Delay the next trimAfterInactivity check to let our state
+        // settle before trimming.
+        _lastMemTrimTime = std::chrono::steady_clock::now();
+    }
+}
+
 void Document::trimIfInactive()
 {
     // Don't perturb memory un-necessarily
     if (_isBgSaveProcess)
         return;
+    if (_bgSavesOngoing)
+    {
+        // Postpone until trimAfterInactivity after bgsave has completed.
+        _trimIfInactivePostponed = true;
+        return;
+    }
+
+    _trimIfInactivePostponed = false;
 
     // FIXME: multi-document mobile optimization ?
     for (const auto& it : _sessions)
@@ -1057,12 +1092,19 @@ void Document::trimIfInactive()
 void Document::trimAfterInactivity()
 {
     // Don't perturb memory un-necessarily
-    if (_isBgSaveProcess)
+    if (_isBgSaveProcess || _bgSavesOngoing)
         return;
 
     if (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() -
                                                          _lastMemTrimTime) < std::chrono::seconds(30))
     {
+        return;
+    }
+
+    // If a deep trim was missed due to an ongoing bg save then enable that to happen now.
+    if (_trimIfInactivePostponed)
+    {
+        trimIfInactive();
         return;
     }
 
@@ -1137,9 +1179,11 @@ void Document::trimAfterInactivity()
             if (session && !session->isCloseFrame())
             {
                 session->loKitCallback(type, payload);
-                if (self->isLoadOngoing())
+                if (self->isLoadOngoing() && !self->processInputEnabled())
+                {
                     LOG_DBG("Enable processing input due to event of " << type << " during load");
-                session->getProtocol()->enableProcessInput(true);
+                    session->getProtocol()->enableProcessInput(true);
+                }
                 return;
             }
         }
@@ -1352,9 +1396,10 @@ bool Document::joinThreads()
     if (!getLOKit()->joinThreads())
         return false;
 
+#if !MOBILEAPP
     if (SocketPoll::PollWatchdog)
         SocketPoll::PollWatchdog->joinThread();
-
+#endif
     _deltaPool.stop();
     return true;
 }
@@ -1366,14 +1411,17 @@ void Document::startThreads()
 
     getLOKit()->startThreads();
 
+#if !MOBILEAPP
     if (SocketPoll::PollWatchdog)
         SocketPoll::PollWatchdog->startThread();
+#endif
 }
 
 void Document::handleSaveMessage(const std::string &)
 {
     LOG_TRC("Check save message");
 
+#if !MOBILEAPP
     // if a bgsave process - now we can clean up.
     if (_isBgSaveProcess)
     {
@@ -1412,14 +1460,17 @@ void Document::handleSaveMessage(const std::string &)
 
         // Next step in the chain is BgSaveChildWebSocketHandler::onDisconnect
     }
+#endif
 }
 
+#if !MOBILEAPP
+
 // need to hold a reference on session in case it exits during async save
-bool Document::forkToSave(const std::function<void()> &childSave, int viewId)
+bool Document::forkToSave(const std::function<void()>& childSave, int viewId)
 {
-#if MOBILEAPP
-    return false;
-#else // !MOBILEAPP
+    if constexpr (Util::isMobileApp())
+        return false;
+
     if (_isBgSaveProcess)
     {
         LOG_ERR("Serious error bgsv process trying to fork again");
@@ -1497,6 +1548,8 @@ bool Document::forkToSave(const std::function<void()> &childSave, int viewId)
     static size_t numSaves = 0;
     numSaves++;
 
+    Log::preFork();
+
     const pid_t pid = fork();
 
     if (!pid) // Child
@@ -1521,14 +1574,19 @@ bool Document::forkToSave(const std::function<void()> &childSave, int viewId)
 
         Util::sleepFromEnvIfSet("KitBackgroundSave", "SLEEPBACKGROUNDFORDEBUGGER");
 
+#if !MOBILEAPP
         assert(!BgSaveWatchdog && "Unexpected to have BackgroundSaveWatchdog instance");
         BgSaveWatchdog = std::make_unique<BackgroundSaveWatchdog>(_mobileAppDocId, Util::getThreadId());
+#endif
 
         UnitKit::get().postBackgroundSaveFork();
 
         // Background save should run at a lower priority
+#if 0
+        // Disable changing priority for now
         int prio = ConfigUtil::getInt("per_document.bgsave_priority", 5);
         Util::setProcessAndThreadPriorities(getpid(), prio);
+#endif
 
         // other queued messages should be handled in the parent kit
         if (_queue)
@@ -1589,7 +1647,6 @@ bool Document::forkToSave(const std::function<void()> &childSave, int viewId)
         reapZombieChildren();
     }
     return true;
-#endif // !MOBILEAPP
 }
 
 void Document::reapZombieChildren()
@@ -1611,6 +1668,8 @@ void Document::reapZombieChildren()
         }
     }
 }
+
+#endif
 
 namespace
 {
@@ -1898,13 +1957,18 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
     const std::string& userTimezone = session->getTimezone();
     const std::string& userPrivateInfo = session->getUserPrivateInfo();
     const std::string& docTemplate = session->getDocTemplate();
+    const std::string& filterOption = session->getInFilterOption();
 
     if constexpr (!Util::isMobileApp())
         consistencyCheckFileExists(uri);
 
     std::string options;
+
+    if (!filterOption.empty())
+        options = filterOption;
+
     if (!lang.empty())
-        options = "Language=" + lang;
+        options += ",Language=" + lang;
 
     if (!deviceFormFactor.empty())
         options += ",DeviceFormFactor=" + deviceFormFactor;
@@ -1928,17 +1992,18 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
     if (FileUtil::Stat(wopiCertDir).exists())
         ::setenv("LO_CERTIFICATE_AUTHORITY_PATH", wopiCertDir.c_str(), 1);
 
-#if !MOBILEAPP
-    // if ssl client verification was disabled in online for the wopi server,
-    // and this is a https connection then also exempt that host from ssl host
-    // verification in 'core'
-    if (session->isDisableVerifyHost())
+    if constexpr (!Util::isMobileApp())
     {
-        std::string scheme, host, port;
-        if (net::parseUri(session->getDocURL(), scheme, host, port) && scheme == "https://")
-            ::setenv("LOK_EXEMPT_VERIFY_HOST", host.c_str(), 1);
+        // if ssl client verification was disabled in online for the wopi server,
+        // and this is a https connection then also exempt that host from ssl host
+        // verification in 'core'
+        if (session->isDisableVerifyHost())
+        {
+            std::string scheme, host, port;
+            if (net::parseUri(session->getDocURL(), scheme, host, port) && scheme == "https://")
+                ::setenv("LOK_EXEMPT_VERIFY_HOST", host.c_str(), 1);
+        }
     }
-#endif
 
     std::string spellOnline = session->getSpellOnline();
     if (!_loKitDocument)
@@ -2147,7 +2212,12 @@ std::shared_ptr<lok::Document> Document::load(const std::shared_ptr<ChildSession
     return _loKitDocument;
 }
 
-bool Document::forwardToChild(const std::string& prefix, const std::vector<char>& payload)
+int Document::getViewsCount() const
+{
+    return _loKitDocument ? _loKitDocument->getViewsCount() : 0;
+}
+
+bool Document::forwardToChild(const std::string_view prefix, const std::vector<char>& payload)
 {
     assert(Util::isFuzzing() || payload.size() > prefix.size());
 
@@ -2660,14 +2730,14 @@ void Document::flushAndExit(int code)
 void Document::dumpState(std::ostream& oss)
 {
     oss << "Kit Document:\n"
-        << "\n\tpid: " << getpid()
+        << "\n\tpid: " << Util::getProcessId()
         << "\n\tstop: " << _stop
         << "\n\tjailId: " << _jailId
         << "\n\tdocKey: " << _docKey
         << "\n\tdocId: " << _docId
         << "\n\turl: " << _url
         << "\n\tobfuscatedFileId: " << _obfuscatedFileId
-        << "\n\tjailedUrl: " << _jailedUrl
+        << "\n\tjailedUrl: " << anonymizeUrl(_jailedUrl)
         << "\n\trenderOpts: " << _renderOpts
         << "\n\thaveDocPassword: " << _haveDocPassword // not the pwd itself
         << "\n\tisDocPasswordProtected: " << _isDocPasswordProtected
@@ -2680,6 +2750,8 @@ void Document::dumpState(std::ostream& oss)
         << "\n\tmodified: " << name(_modified)
         << "\n\tbgSaveProc: " << _isBgSaveProcess
         << "\n\tbgSaveDisabled: "<< _isBgSaveDisabled;
+    if (!_isBgSaveProcess)
+        oss << "\n\tbgSavesOnging: "<< _bgSavesOngoing;
 
     std::string smap;
     if (const ssize_t size = FileUtil::readFile("/proc/self/smaps_rollup", smap); size <= 0)
@@ -2728,8 +2800,8 @@ void Document::dumpState(std::ostream& oss)
     for (const auto &it : _sessionUserInfo)
     {
         oss << "\n\t\tviewId: " << it.first
-            << " userId: " << it.second.getUserId()
-            << " userName: " << it.second.getUserName()
+            << " userId: " << Anonymizer::anonymize(it.second.getUserId())
+            << " userName: " << Anonymizer::anonymize(it.second.getUserName())
             << " userExtraInfo: " << it.second.getUserExtraInfo()
             << " readOnly: " << it.second.isReadOnly()
             << " connected: " << it.second.isConnected();
@@ -2739,8 +2811,12 @@ void Document::dumpState(std::ostream& oss)
     char *pState = nullptr;
     _loKit->dumpState("", &pState);
     oss << "lok state:\n";
-    if (pState)
-        oss << pState;
+    if (pState) {
+        std::string stateStr(pState);
+        std::string fileId = Uri::getFilenameFromURL(Uri::decode(_jailedUrl));
+        Util::replaceAllSubStr(stateStr, fileId, _obfuscatedFileId);
+        oss << stateStr;
+    }
     oss << '\n';
 }
 
@@ -3611,7 +3687,7 @@ void lokit_main(
                 Util::forcedExit(EX_SOFTWARE);
             }
 
-#ifndef __FreeBSD__
+#if HAVE_LIBCAP
             if (usingMountNamespace)
             {
                 // We have a full set of capabilities in the namespace so drop
@@ -3625,10 +3701,11 @@ void lokit_main(
                 dropCapability(CAP_FOWNER);
                 dropCapability(CAP_CHOWN);
             }
-#endif
+
             char *capText = cap_to_text(cap_get_proc(), nullptr);
             LOG_DBG("Initialized jail nodes, dropped caps. Final caps are: " << capText);
             cap_free(capText);
+#endif
         }
         else // noCapabilities set
         {
@@ -3988,32 +4065,46 @@ std::string anonymizeUrl(const std::string& url)
 #endif
 }
 
-static int receiveURPFromLO(void* context, const signed char* buffer, int bytesToWrite)
+#if !MOBILEAPP
+
+static int receiveURPData(void* context, const signed char* buffer, size_t bytesToWrite)
 {
-    int bytesWritten = 0;
+    const signed char *ptr = buffer;
     while (bytesToWrite > 0)
     {
-        int bytes = ::write(reinterpret_cast<intptr_t>(context), buffer + bytesWritten, bytesToWrite);
+        ssize_t bytes = ::write(reinterpret_cast<intptr_t>(context), ptr, bytesToWrite);
         if (bytes <= 0)
             break;
         bytesToWrite -= bytes;
-        bytesWritten += bytes;
+        ptr += bytes;
     }
-    return bytesWritten;
+    return ptr - buffer;
+}
+
+static size_t sendURPData(void* context, signed char* buffer, size_t bytesToRead)
+{
+    signed char *ptr = buffer;
+    while (bytesToRead > 0)
+    {
+        ssize_t bytes = ::read(reinterpret_cast<intptr_t>(context), ptr, bytesToRead);
+        if (bytes <= 0)
+            break;
+        bytesToRead -= bytes;
+        ptr += bytes;
+    }
+    return ptr - buffer;
+}
+
+static int receiveURPFromLO(void* context, const signed char* buffer, int bytesToWrite)
+{
+    assert(bytesToWrite >= 0 && "cannot be negative");
+    return receiveURPData(context, buffer, bytesToWrite);
 }
 
 static int sendURPToLO(void* context, signed char* buffer, int bytesToRead)
 {
-    int bytesRead = 0;
-    while (bytesToRead > 0)
-    {
-        int bytes = ::read(reinterpret_cast<intptr_t>(context), buffer + bytesRead, bytesToRead);
-        if (bytes <= 0)
-            break;
-        bytesToRead -= bytes;
-        bytesRead += bytes;
-    }
-    return bytesRead;
+    assert(bytesToRead >= 0 && "cannot be negative");
+    return sendURPData(context, buffer, bytesToRead);
 }
 
 bool startURP(const std::shared_ptr<lok::Office>& LOKit, void** ppURPContext)
@@ -4043,8 +4134,6 @@ bool startURP(const std::shared_ptr<lok::Office>& LOKit, void** ppURPContext)
     URPStartCount++;
     return true;
 }
-
-#if !MOBILEAPP
 
 /// Initializes LibreOfficeKit for cross-fork re-use.
 bool globalPreinit(const std::string &loTemplate)
@@ -4144,14 +4233,17 @@ std::string anonymizeUsername(const std::string& username)
 void dump_kit_state()
 {
     std::ostringstream oss(Util::makeDumpStateStream());
+    oss << "Start Kit " << getpid() << " Dump State:\n";
+
     KitSocketPoll::dumpGlobalState(oss);
 
     oss << "\nMalloc info [" << getpid() << "]: \n\t"
         << Util::replace(Util::getMallocInfo(), "\n", "\n\t") << '\n';
+    oss << "\nEnd Kit " << getpid() << " Dump State.\n";
 
     const std::string msg = oss.str();
-    fprintf(stderr, "%s", msg.c_str());
-    LOG_TRC(msg);
+    fprintf(stderr, "%s", msg.c_str()); // Log in the journal.
+    LOG_WRN(msg);
 }
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

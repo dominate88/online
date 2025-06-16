@@ -91,7 +91,7 @@ L.Map = L.Evented.extend({
 		}
 
 		if (options.center && options.zoom !== undefined) {
-			this.setView(L.latLng(options.center), options.zoom, {reset: true});
+			this.setView(L.latLng(options.center), options.zoom, true /* reset */);
 		}
 
 		Cursor.imagePath = options.cursorURL;
@@ -111,6 +111,7 @@ L.Map = L.Evented.extend({
 		this._previewRequestsOnFly = 0;
 		this._timeToEmptyQueue = new Date();
 		this._partsDirection = 1; // For pre-fetching the slides in the direction of travel.
+		this._lockAccessibilityOn = false;
 		// Focusing:
 		//
 		// Cursor is visible or hidden (e.g. for graphic selection).
@@ -194,7 +195,7 @@ L.Map = L.Evented.extend({
 			{
 				document.getElementById('document-container').classList.add('mobile');
 				this._size = new L.Point(0,0);
-				this._onResize();
+				this.showCalcInputBar();
 			}
 		});
 		this.on('updatetoolbarcommandvalues', function(e) {
@@ -291,7 +292,7 @@ L.Map = L.Evented.extend({
 				if (window.ThisIsTheAndroidApp) {
 					window.postMobileMessage('hideProgressbar');
 				}
-			} else if (this._docLayer) {
+			} else if (this._docLayer && app.sectionContainer) {
 				// remove the comments and changes
 				var commentSection = app.sectionContainer.getSectionWithName(L.CSections.CommentList.name);
 				if (commentSection)
@@ -357,6 +358,12 @@ L.Map = L.Evented.extend({
 		this._textInput.showCursor();
 	},
 
+	lockAccessibilityOn: function() {
+		this.setAccessibilityState(true);
+		this._lockAccessibilityOn = true;
+		this.fire('a11ystatechanged');
+	},
+
 	// end of A11y
 
 	loadDocument: function(socket) {
@@ -369,7 +376,6 @@ L.Map = L.Evented.extend({
 		// TODO: remove duplicated init code
 		app.socket.sendMessage('commandvalues command=.uno:LanguageStatus');
 		if (this._docLayer._docType === 'spreadsheet') {
-			this._docLayer._gotFirstCellCursor = false;
 			if (this._docLayer.options.sheetGeometryDataEnabled)
 				this._docLayer.requestSheetGeometryData();
 			this._docLayer.refreshViewData();
@@ -415,12 +421,41 @@ L.Map = L.Evented.extend({
 		this.fire('removeview', {viewId: viewid, username: username});
 	},
 
+	panBy: function (offset) {
+		offset = L.point(offset).round();
 
-	// replaced by animation-powered implementation in Map.PanAnimation.js
-	setView: function (center, zoom) {
-		zoom = zoom === undefined ? this.getZoom() : zoom;
-		this._resetView(L.latLng(center), this._limitZoom(zoom));
+		if (!offset.x && !offset.y)
+			return this;
+
+		//If we pan too far then chrome gets issues with tiles
+		// and makes them disappear or appear in the wrong place (slightly offset) #2602
+		if (!this.getSize().contains(offset)) {
+			this._resetView(this.unproject(this.project(this.getCenter()).add(offset)), this.getZoom());
+			return this;
+		}
+
+		this.fire('movestart');
+		L.DomUtil.setPosition(this._mapPane, this._getMapPanePos().subtract(offset));
+		this.fire('move').fire('moveend');
+
 		return this;
+	},
+
+	setView: function (center, zoom, reset) {
+		zoom = zoom === undefined ? this._zoom : this._limitZoom(zoom);
+		center = this._limitCenter(L.latLng(center), zoom, this.options.maxBounds);
+
+		if (this._loaded && !reset && zoom === this._zoom) {
+			// difference between the new and current centers in pixels
+			var offset = this._getCenterOffset(center)._floor();
+			this.panBy(offset);
+			return this;
+		}
+		else {
+			this._resetView(center, zoom);
+
+			return this;
+		}
 	},
 
 	updateAvatars: function() {
@@ -679,7 +714,7 @@ L.Map = L.Evented.extend({
 						     curCenter.lng + (caretPos.lng - curCenter.lng) * (1.0 - zoomScale));
 
 			mapUpdater = function() {
-				thisObj.setView(newCenter, zoom, {zoom: options});
+				thisObj.setView(newCenter, zoom);
 			};
 			runAtFinish = function() {
 				thisObj._docLayer.setZoomChanged(false);
@@ -704,7 +739,7 @@ L.Map = L.Evented.extend({
 		}
 
 		mapUpdater = function() {
-			thisObj.setView(curCenter, zoom, {zoom: options});
+			thisObj.setView(curCenter, zoom);
 		};
 
 		runAtFinish = function() {
@@ -731,7 +766,7 @@ L.Map = L.Evented.extend({
 		return this.setZoom(this._zoom - (delta || 1), options, animate);
 	},
 
-	setZoomAround: function (latlng, zoom, options) {
+	setZoomAround: function (latlng, zoom) {
 		var scale = this.getZoomScale(zoom),
 		    viewHalf = this.getSize().divideBy(2),
 		    containerPoint = latlng instanceof L.Point ? latlng : this.latLngToContainerPointIgnoreSplits(latlng),
@@ -739,21 +774,11 @@ L.Map = L.Evented.extend({
 		    centerOffset = containerPoint.subtract(viewHalf).multiplyBy(1 - 1 / scale),
 		    newCenter = this.containerPointToLatLngIgnoreSplits(viewHalf.add(centerOffset));
 
-		return this.setView(newCenter, zoom, {zoom: options});
+		return this.setView(newCenter, zoom);
 	},
 
-	panTo: function (center, options) { // (LatLng)
-		return this.setView(center, this._zoom, {pan: options});
-	},
-
-	panBy: function (offset) { // (Point)
-		// replaced with animated panBy in Map.PanAnimation.js
-		this.fire('movestart');
-
-		this._rawPanBy(L.point(offset));
-
-		this.fire('move');
-		return this.fire('moveend');
+	panTo: function (center) { // (LatLng)
+		return this.setView(center, this._zoom);
 	},
 
 	setMaxBounds: function (bounds) {
@@ -785,29 +810,24 @@ L.Map = L.Evented.extend({
 			this._docLayer._cssPixelsToCore(bottomRight));
 	},
 
-	panInsideBounds: function (bounds, options) {
+	panInsideBounds: function (bounds) {
 		var center = this.getCenter(),
 		    newCenter = this._limitCenter(center, this._zoom, bounds);
 
 		if (center.equals(newCenter)) { return this; }
 		if (this.distance(center, newCenter) < 0.0000001) { return this; }
 
-		return this.panTo(newCenter, options);
+		return this.panTo(newCenter);
 	},
 
 	// If map size has already been updated, invalidateSize needs the oldSize to work properly
 	// (e.g. if getSize() has already been called whith _sizeChanged === true)
-	invalidateSize: function (options, oldSize) {
+	invalidateSize: function (debounceMoveend, oldSize) {
 		if (!this._loaded) { return this; }
 
-		options = L.extend({
-			animate: false,
-			pan: false
-		}, options === true ? {animate: true} : options);
-
-		if (!oldSize) {
+		if (!oldSize)
 			oldSize = this.getSize();
-		}
+
 		this._sizeChanged = true;
 
 		var newSize = this.getSize(),
@@ -817,22 +837,13 @@ L.Map = L.Evented.extend({
 
 		if (!offset.x && !offset.y) { return this; }
 
-		if (options.animate && options.pan) {
-			this.panBy(offset);
+		this.fire('move');
 
+		if (debounceMoveend) {
+			clearTimeout(this._sizeTimer);
+			this._sizeTimer = setTimeout(L.bind(this.fire, this, 'moveend'), 200);
 		} else {
-			if (options.pan) {
-				this._rawPanBy(offset);
-			}
-
-			this.fire('move');
-
-			if (options.debounceMoveend) {
-				clearTimeout(this._sizeTimer);
-				this._sizeTimer = setTimeout(L.bind(this.fire, this, 'moveend'), 200);
-			} else {
-				this.fire('moveend');
-			}
+			this.fire('moveend');
 		}
 
 		return this.fire('resize', {
@@ -1275,7 +1286,6 @@ L.Map = L.Evented.extend({
 
 		this._mapPane = this.createPane('mapPane', this._container);
 
-		this.createPane('tilePane');
 		this.createPane('shadowPane');
 		this.createPane('overlayPane');
 		this.createPane('markerPane');
@@ -1334,10 +1344,6 @@ L.Map = L.Evented.extend({
 		app.setFollowingUser(backupFollowed);
 	},
 
-	_rawPanBy: function (offset) {
-		L.DomUtil.setPosition(this._mapPane, this._getMapPanePos().subtract(offset));
-	},
-
 	_getZoomSpan: function () {
 		return this.getMaxZoom() - this.getMinZoom();
 	},
@@ -1366,22 +1372,10 @@ L.Map = L.Evented.extend({
 
 		this._mainEvents(onOff);
 
-		app.events.on('resize', this._onResize.bind(this));
-
 		L.DomEvent[onOff](window, 'blur', this._onLostFocus, this);
 		L.DomEvent[onOff](window, 'focus', this._onGotFocus, this);
 	},
 
-	_onResize: function () {
-		app.util.cancelAnimFrame(this._resizeRequest);
-		this._resizeRequest = app.util.requestAnimFrame(
-			function () { this.invalidateSize({debounceMoveend: true}); }, this, false, this._container);
-
-		if (this.sidebar)
-			this.sidebar.onResize();
-
-		this.showCalcInputBar();
-	},
 
 	showCalcInputBar: function() {
 		if (this.formulabar)
@@ -1511,7 +1505,7 @@ L.Map = L.Evented.extend({
 
 		if (!target) { return false; }
 
-		return (L.DomUtil.hasClass(target, 'leaflet-tile')
+		return ((target.id === 'map' || target.classList.contains('leaflet-layer'))
 			&& !(related && (L.DomUtil.hasClass(related, 'leaflet-tile')
 				|| L.DomUtil.hasClass(related, 'leaflet-cursor'))));
 	},

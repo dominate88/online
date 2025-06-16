@@ -36,6 +36,8 @@ class UtilTests : public CPPUNIT_NS::TestFixture
 #if ENABLE_DEBUG
     CPPUNIT_TEST(testUtf8);
 #endif
+    CPPUNIT_TEST(testEliminatePrefix);
+    CPPUNIT_TEST(testStreamMatch);
 
     CPPUNIT_TEST_SUITE_END();
 
@@ -45,11 +47,13 @@ class UtilTests : public CPPUNIT_NS::TestFixture
     void testNumberToHex();
     void testCharacterConverter();
     void testUtf8();
+    void testEliminatePrefix();
+    void testStreamMatch();
 };
 
 void UtilTests::testStringifyHexLine()
 {
-    constexpr auto testname = __func__;
+    constexpr std::string_view testname = __func__;
 
     std::string test("hello here\ntest");
     std::string result1("68 65 6C 6C 6F 20 68 65  72 65 0A 74 65 73 74"
@@ -62,7 +66,7 @@ void UtilTests::testStringifyHexLine()
 
 void UtilTests::testHexify()
 {
-    constexpr auto testname = __func__;
+    constexpr std::string_view testname = __func__;
 
     const std::string s1 = "some ascii text with !@#$%^&*()_+/-\\|";
     const auto hex = HexUtil::dataToHexString(s1, 0, s1.size());
@@ -85,7 +89,7 @@ void UtilTests::testHexify()
 
 void UtilTests::testBytesToHex()
 {
-    constexpr auto testname = __func__;
+    constexpr std::string_view testname = __func__;
 
     {
         const std::string d("Some text");
@@ -107,7 +111,7 @@ static std::string hexifyStd(const std::uint64_t number, int width, std::size_t 
 
 void UtilTests::testNumberToHex()
 {
-    constexpr auto testname = __func__;
+    constexpr std::string_view testname = __func__;
 
     for (int width = 0; width < 33; ++width)
     {
@@ -157,7 +161,7 @@ void UtilTests::testNumberToHex()
 
 void UtilTests::testCharacterConverter()
 {
-    constexpr auto testname = __func__;
+    constexpr std::string_view testname = __func__;
 
     const std::string utf8 = "Ḽơᶉëᶆ ȋṕšᶙṁ ḍỡḽǭᵳ ʂǐť";
     const std::string utf7 = "+HjwBoR2JAOsdhg +AgseVQFhHZkeQQ +Hg0e4R49Ae0dcw +AoIB0AFl-";
@@ -194,13 +198,51 @@ void UtilTests::testCharacterConverter()
 void UtilTests::testUtf8()
 {
 #if ENABLE_DEBUG
-    constexpr auto testname = __func__;
+    constexpr std::string_view testname = __func__;
     LOK_ASSERT(Util::isValidUtf8("foo"));
     LOK_ASSERT(Util::isValidUtf8("©")); // 2 char
     LOK_ASSERT(Util::isValidUtf8("→ ")); // 3 char
     LOK_ASSERT(Util::isValidUtf8("🏃 is not 🏊."));
     LOK_ASSERT(!Util::isValidUtf8("\xff\x03"));
 #endif
+}
+
+void UtilTests::testEliminatePrefix()
+{
+    constexpr auto testname = __func__;
+
+    LOK_ASSERT_EQUAL_STR(std::string(), Util::eliminatePrefix(std::string(), std::string()));
+    LOK_ASSERT_EQUAL_STR("test", Util::eliminatePrefix("test", std::string()));
+    LOK_ASSERT_EQUAL_STR("", Util::eliminatePrefix(std::string(), "test"));
+    LOK_ASSERT_EQUAL_STR("what", Util::eliminatePrefix(std::string("testwhat"), "test"));
+    LOK_ASSERT_EQUAL_STR("Command", Util::eliminatePrefix(std::string(".uno:Command"), ".uno:"));
+    LOK_ASSERT_EQUAL_STR("", Util::eliminatePrefix(std::string(".uno:Command"), ".uno:Command"));
+    LOK_ASSERT_EQUAL_STR(".uno:Command", Util::eliminatePrefix(std::string(".uno:Command"), ".uno:Commander"));
+    LOK_ASSERT_EQUAL_STR("uno:Command", Util::eliminatePrefix(std::string(".uno:Command"), "."));
+    LOK_ASSERT_EQUAL_STR(".uno:Command", Util::eliminatePrefix(std::string(".uno:Command"), ""));
+}
+
+void UtilTests::testStreamMatch()
+{
+    constexpr auto testname = __func__;
+
+    std::string input("Lorem ipsum dolor sit amet consectetur adipiscing elit");
+    std::istringstream is(input);
+    std::ostringstream os;
+
+    Util::copyToMatch(is, os, " amet ");
+    std::string expected = "Lorem ipsum dolor sit";
+    LOK_ASSERT_EQUAL_STR(expected, os.str());
+    // input stream read position should be at the start of the match
+    LOK_ASSERT_EQUAL(static_cast<std::streampos>(expected.size()), is.tellg());
+
+    Util::seekToMatch(is, " adipiscing ");
+    LOK_ASSERT_EQUAL(static_cast<std::streampos>(38), is.tellg());
+
+    // copy as far as match that never occurs should copy to end of stream
+    Util::copyToMatch(is, os, "nomatch");
+    std::string final = "Lorem ipsum dolor sit adipiscing elit";
+    LOK_ASSERT_EQUAL_STR(final, os.str());
 }
 
 CPPUNIT_TEST_SUITE_REGISTRATION(UtilTests);

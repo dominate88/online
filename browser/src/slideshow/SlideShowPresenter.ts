@@ -245,6 +245,13 @@ class SlideShowPresenter {
 		return info.notes;
 	}
 
+	public getVideoRenderer(
+		slideHash: string,
+		videoInfo: VideoInfo,
+	): VideoRenderer {
+		return this._slideCompositor.getVideoRenderer(slideHash, videoInfo);
+	}
+
 	_onFullScreenChange() {
 		this._fullscreen = document.fullscreenElement;
 		if (this._fullscreen) {
@@ -446,7 +453,7 @@ class SlideShowPresenter {
 			<html lang="en">
 			<head>
 				<meta charset="UTF-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<meta name="viewport" content="width=device-width, initial-scale=1">
 				<title>${sanitizedTitle}</title>
 			</head>
 			<body>
@@ -603,6 +610,14 @@ class SlideShowPresenter {
 		if (app.impress.areAllSlidesHidden()) {
 			this._notifyAllSlidesHidden();
 			return false;
+		}
+
+		// if we're playing a video, it'll continue *under* the presentation if we aren't careful
+		// that's not a problem for visuals, but the audio of the video will also play
+		// we don't currently need to do this for <audio> elements, since as we just use <video> tags for that anyway
+		const videos = document.getElementsByTagName('video');
+		for (const video of Array.from(videos)) {
+			video.pause();
 		}
 
 		if (!this._map['wopi'].DownloadAsPostMessage) {

@@ -450,10 +450,13 @@ public:
     STATE_ENUM(StorageType,
                Unsupported, ///< An unsupported type.
                Unauthorized, ///< The host is not allowed by the admin.
+               Conversion, ///< Document conversion works like File-System internally.
+#if ENABLE_LOCAL_FILESYSTEM
                FileSystem, ///< File-System storage. Only for testing.
+#endif
 #if !MOBILEAPP
                Wopi ///< WOPI-like storage.
-#endif //!MOBILEAPP
+#endif
     );
 
     /// Validates the given URI.
@@ -525,11 +528,14 @@ private:
     std::string _jailedFilePathAnonym;
     bool _isDownloaded;
 
+#if ENABLE_LOCAL_FILESYSTEM
     static bool FilesystemEnabled;
+#endif
 };
 
 /// Trivial implementation of local storage that does not need do anything.
-class LocalStorage : public StorageBase
+/// Used by both the FileSystem storage and for document conversion.
+class LocalStorage final : public StorageBase
 {
 public:
     LocalStorage(const Poco::URI& uri, const std::string& localStorePath,

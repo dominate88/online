@@ -1,3 +1,16 @@
+/* -*- js-indent-level: 8 -*- */
+/*
+ * Copyright the Collabora Online contributors.
+ *
+ * SPDX-License-Identifier: MPL-2.0
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ */
+
+var _: any = (window as any)._;
+
 interface XcuObject {
 	[app: string]: any;
 }
@@ -143,6 +156,9 @@ class Xcu {
 					? defaultXcuObj
 					: this.parse(XcuFileContent);
 		} catch (error) {
+			(window as any).SettingIframe.showErrorModal(
+				_('Something went wrong while loading Document settings.'),
+			);
 			console.error('Error parsing XCU file:', error);
 		}
 	}
@@ -152,7 +168,9 @@ class Xcu {
 		const xmlDoc = parser.parseFromString(content, 'application/xml');
 
 		if (xmlDoc.getElementsByTagName('parsererror').length > 0) {
-			throw new Error('Error parsing XCU file: Invalid XML content.');
+			(window as any).SettingIframe.showErrorModal(
+				_('Something went wrong while loading Document settings.'),
+			);
 		}
 
 		const result: XcuObject = {};
@@ -378,11 +396,11 @@ class Xcu {
 
 	public createXcuEditorUI(container: HTMLElement): HTMLElement {
 		const heading = document.createElement('h3');
-		heading.textContent = 'Document View';
+		heading.textContent = _('Document Settings');
 		container.appendChild(heading);
 
 		const descEl = document.createElement('p');
-		descEl.textContent = 'Adjust how office documents look.';
+		descEl.textContent = _('Adjust how office documents behave.');
 		container.appendChild(descEl);
 
 		const editorContainer = document.createElement('div');
@@ -427,7 +445,7 @@ class Xcu {
 
 		const contentsContainer = document.createElement('div');
 		contentsContainer.id = 'xcu-tab-contents';
-		contentsContainer.textContent = 'Select a tab to view settings.';
+		contentsContainer.textContent = _('Select a tab to view settings.');
 
 		editorContainer.appendChild(navContainer);
 		editorContainer.appendChild(contentsContainer);
@@ -440,7 +458,7 @@ class Xcu {
 		resetButton.type = 'button';
 		resetButton.id = 'xcu-reset-button';
 		resetButton.classList.add('button', 'button--vue-secondary');
-		resetButton.title = 'Reset to default Document View settings';
+		resetButton.title = _('Reset to default Document settings');
 		resetButton.innerHTML = `
 			<span class="button__wrapper">
 				<span class="button__icon xcu-reset-icon">
@@ -454,7 +472,7 @@ class Xcu {
 
 		resetButton.addEventListener('click', async () => {
 			const confirmed = window.confirm(
-				'Are you sure you want to reset Document View settings?',
+				_('Are you sure you want to reset Document settings?'),
 			);
 			if (!confirmed) {
 				return;
@@ -469,7 +487,7 @@ class Xcu {
 		saveButton.type = 'button';
 		saveButton.id = 'xcu-save-button';
 		saveButton.classList.add('button', 'button-primary');
-		saveButton.title = 'Save Document View settings';
+		saveButton.title = _('Save Document settings');
 		saveButton.innerHTML = `
 			<span class="button__wrapper">
 				<span class="button--text-only">Save</span>

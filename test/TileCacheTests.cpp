@@ -201,7 +201,7 @@ bool TileCacheTests::getPartFromInvalidateMessage(const std::string& message, in
 
 void TileCacheTests::testDesc()
 {
-    constexpr auto testname = __func__;
+    constexpr std::string_view testname = __func__;
 
     TileDesc descA = TileDesc(CanonicalViewId::None, 0, 0, 256, 256, 0, 0, 3200, 3200, /* ignored in cache */ 0, 1234, 1);
     TileDesc descB = TileDesc(CanonicalViewId::None, 0, 0, 256, 256, 0, 0, 3200, 3200, /* ignored in cache */ 1, 1235, 2);
@@ -213,7 +213,7 @@ void TileCacheTests::testDesc()
 
 void TileCacheTests::testSimple()
 {
-    constexpr auto testname = __func__;
+    constexpr std::string_view testname = __func__;
 
     if (isStandalone())
     {
@@ -413,7 +413,7 @@ void TileCacheTests::testTileSubscription()
 
 void TileCacheTests::testSize()
 {
-    constexpr auto testname = __func__;
+    constexpr std::string_view testname = __func__;
 
     // Create TileCache and pretend the file was modified as recently as
     // now, so it discards the cached data.
@@ -905,7 +905,7 @@ void TileCacheTests::testLoad12ods()
 
 void TileCacheTests::checkBlackTile(BlobData::const_iterator start, BlobData::const_iterator end)
 {
-    constexpr auto testname = __func__;
+    constexpr std::string_view testname = __func__;
 
     size_t width = 256, height = 256, black = 0;
 
@@ -1280,8 +1280,9 @@ void TileCacheTests::checkTiles(std::shared_ptr<http::WebSocketSession>& socket,
         if (currentPart != it)
         {
             // change part
-            const std::string text = Poco::format("setclientpart part=%d", it);
-            sendTextFrame(socket, text, testname);
+            std::ostringstream oss;
+            oss << "setclientpart part=" << it;
+            sendTextFrame(socket, oss.str(), testname);
             // Wait for the change to take effect otherwise we get invalidatetile
             // which removes our next tile request subscription (expecting us to
             // issue a new tile request as a response, which a real client would do).
@@ -1344,10 +1345,11 @@ void TileCacheTests::requestTiles(std::shared_ptr<http::WebSocketSession>& socke
             tileHeight = tileSize;
             tileX = tileSize * itCol;
             tileY = tileSize * itRow;
-            text
-                = Poco::format("tile nviewid=0 part=%d width=%d height=%d tileposx=%d tileposy=%d "
-                               "tilewidth=%d tileheight=%d",
-                               part, pixTileSize, pixTileSize, tileX, tileY, tileWidth, tileHeight);
+            std::ostringstream oss;
+            oss << "tile nviewid=0 part=" << part << " width=" << pixTileSize
+                << " height=" << pixTileSize << " tileposx=" << tileX << " tileposy=" << tileY
+                << " tilewidth=" << tileWidth << " tileheight=" << tileHeight;
+            text = oss.str();
 
             sendTextFrame(socket, text, testname);
             tile = assertResponseString(socket, "tile:", testname);

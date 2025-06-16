@@ -61,6 +61,7 @@ interface JSBuilder {
 	_getGridColumns: (data: WidgetJSON[]) => number;
 	_getGridRows: (data: WidgetJSON[]) => number;
 	_preventDocumentLosingFocusOnClick: (container: Element) => void;
+	_cleanText: (text: string) => string;
 	_expanderHandler: any; // FIXME: use handlers getter instead
 }
 
@@ -138,6 +139,7 @@ interface PanelWidgetJSON extends WidgetJSON {
 	hidden: boolean; // is hidden
 	command: string; // command to trigger options for a panel
 	text: string; // panel title
+	name?: string; // legacy panel id
 }
 
 type ExpanderWidgetJSON = any;

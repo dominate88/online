@@ -83,7 +83,7 @@ ConvertToBroker::ConvertToBroker(const std::string& uri, const Poco::URI& uriPub
             << "].");
 
     CONFIG_STATIC const std::chrono::seconds limit_convert_secs(
-        ConfigUtil::getConfigValue<int>("per_document.limit_convert_secs", 100));
+        ConfigUtil::getConfigValue<std::chrono::seconds>("per_document.limit_convert_secs", 100));
     _limitLifeSeconds = limit_convert_secs;
     ++gConvertToBrokerInstanceCouter;
 }
@@ -132,6 +132,8 @@ void ConvertToBroker::sendStartMessage(const std::shared_ptr<ClientSession>& cli
     std::string load = "load url=" + encodedFrom + " batch=true";
     if (!getLang().empty())
         load += " lang=" + getLang();
+    if(!_sOptions.empty() && _sOptions.starts_with(",infilterOptions="))
+        load +=  " " + _sOptions.substr(1);
     std::vector<char> loadRequest(load.begin(), load.end());
     clientSession->handleMessage(loadRequest);
 }

@@ -252,7 +252,7 @@ public:
 
     const std::string& getLang() const { return _lang; }
 
-    const std::string& getTimezone() const { return _timezone; }
+    const std::string& getTimezone() const { return _timeZone; }
 
     bool getHaveDocPassword() const { return _haveDocPassword; }
 
@@ -305,6 +305,8 @@ public:
     void disableSpellCheckIfReadOnly();
 
     const std::string& getDocTemplate() const { return _docTemplate; }
+
+    const std::string& getInFilterOption() const { return _inFilterOptions; }
 
 protected:
     Session(const std::shared_ptr<ProtocolHandlerInterface> &handler,
@@ -379,7 +381,7 @@ private:
     std::string _lang;
 
     /// Timezone of the user.
-    std::string _timezone;
+    std::string _timeZone;
 
     /// The form factor of the device where the client is running: desktop, tablet, mobile.
     std::string _deviceFormFactor;
@@ -450,6 +452,9 @@ private:
     /// Specifies whether certification verification for the wopi server
     /// should be disabled in core
     bool _disableVerifyHost;
+
+    /// Used in convert-to apis to specify loading options
+    std::string _inFilterOptions;
 
 };
 

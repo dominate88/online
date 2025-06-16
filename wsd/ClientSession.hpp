@@ -155,6 +155,7 @@ public:
     void setSaveAsSocket(const std::shared_ptr<StreamSocket>& socket)
     {
         _saveAsSocket = socket;
+        _isConvertTo = static_cast<bool>(socket);
     }
 
     std::shared_ptr<DocumentBroker> getDocumentBroker() const { return _docBroker.lock(); }
@@ -234,7 +235,7 @@ public:
     void handleClipboardRequest(DocumentBroker::ClipboardRequest     type,
                                 const std::shared_ptr<StreamSocket> &socket,
                                 const std::string                   &tag,
-                                const std::shared_ptr<std::string>  &data);
+                                const std::string                   &clipFile);
 
     /// Create URI for transient clipboard content.
     std::string getClipboardURI(bool encode = true);
@@ -244,10 +245,11 @@ public:
 
     /// Adds and/or modified the copied payload before sending on to the client.
     void postProcessCopyPayload(const std::shared_ptr<Message>& payload);
+    bool postProcessCopyPayload(std::istream&, std::ostream&);
 
     /// Removes the <meta name="origin" ...> tag which was added in
     /// ClientSession::postProcessCopyPayload().
-    void preProcessSetClipboardPayload(std::string& payload);
+    bool preProcessSetClipboardPayload(std::istream&, std::ostream&);
 
     /// Returns true if we're expired waiting for a clipboard and should be removed
     bool staleWaitDisconnect(std::chrono::steady_clock::time_point now);
@@ -353,6 +355,10 @@ private:
 
     std::string getIsAdminUserStatus() const;
 
+    /// Abort conversion due to failure.
+    void abortConversion(const std::shared_ptr<DocumentBroker>& docBroker,
+                         const std::shared_ptr<StreamSocket>& saveAsSocket, std::string errorKind);
+
 private:
     /// URI with which client made request to us
     const Poco::URI _uriPublic;
@@ -383,7 +389,7 @@ private:
     std::weak_ptr<DocumentBroker> _docBroker;
 
     /// The socket to which the converted (saveas) doc is sent.
-    std::shared_ptr<StreamSocket> _saveAsSocket;
+    std::weak_ptr<StreamSocket> _saveAsSocket;
 
     /// Time of last state transition
     std::chrono::steady_clock::time_point _lastStateTime;
@@ -463,6 +469,9 @@ private:
 
     /// If browser setting was already sent
     bool _sentBrowserSetting;
+
+    /// If Session is for convert-to
+    bool _isConvertTo;
 };
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

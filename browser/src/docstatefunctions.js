@@ -60,6 +60,30 @@ app.isPointVisibleInTheDisplayedArea = function (twipsArray /* x, y */) {
 	}
 };
 
+app.isXVisibleInTheDisplayedArea = function (twipsX) {
+	if (app.map._docLayer._splitPanesContext) {
+		let rectangles = app.map._docLayer._splitPanesContext.getViewRectangles();
+		for (let i = 0; i < rectangles.length; i++) {
+			if (rectangles[i].containsX(twipsX)) return true;
+		}
+		return false;
+	} else {
+		return app.file.viewedRectangle.containsX(twipsX);
+	}
+};
+
+app.isYVisibleInTheDisplayedArea = function (twipsY) {
+	if (app.map._docLayer._splitPanesContext) {
+		let rectangles = app.map._docLayer._splitPanesContext.getViewRectangles();
+		for (let i = 0; i < rectangles.length; i++) {
+			if (rectangles[i].containsY(twipsY)) return true;
+		}
+		return false;
+	} else {
+		return app.file.viewedRectangle.containsY(twipsY);
+	}
+};
+
 app.isRectangleVisibleInTheDisplayedArea = function (
 	twipsArray /* x, y, width, height */,
 ) {
@@ -72,6 +96,24 @@ app.isRectangleVisibleInTheDisplayedArea = function (
 	} else {
 		return app.file.viewedRectangle.intersectsRectangle(twipsArray);
 	}
+};
+
+app.isXOrdinateInFrozenPane = function (pixelX) {
+	if (app.map._docLayer._splitPanesContext) {
+		const splitPos = app.map._docLayer._splitPanesContext.getSplitPos();
+
+		if (pixelX < splitPos.x) return true;
+		else return false;
+	} else return false;
+};
+
+app.isYOrdinateInFrozenPane = function (pixelY) {
+	if (app.map._docLayer._splitPanesContext) {
+		const splitPos = app.map._docLayer._splitPanesContext.getSplitPos();
+
+		if (pixelY < splitPos.y) return true;
+		else return false;
+	} else return false;
 };
 
 app.isReadOnly = function () {
@@ -233,12 +275,14 @@ app.isExperimentalMode = function () {
 
 app.calc.isPartHidden = function (part) {
 	if (!app.map._docLayer || !app.map._docLayer._lastStatusJSON) return false;
+	if (part >= app.map._docLayer._lastStatusJSON.parts.length) return false;
 
 	return app.map._docLayer._lastStatusJSON.parts[part].visible === 0; // ToDo: Move _lastStatusJSON into docstate.js
 };
 
 app.calc.isPartProtected = function (part) {
 	if (!app.map._docLayer || !app.map._docLayer._lastStatusJSON) return false;
+	if (part >= app.map._docLayer._lastStatusJSON.parts.length) return false;
 
 	return app.map._docLayer._lastStatusJSON.parts[part].protected === 1;
 };

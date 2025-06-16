@@ -103,6 +103,8 @@ class LayerDrawing {
 	private onSlideRenderingCompleteCallback: VoidFunction = null;
 	private layerRenderer: LayerRenderer;
 	private videoRenderers: Map<string, Array<VideoRenderer>> = new Map();
+	private isTransitionActive: boolean = false;
+	private queuedLayers: any[] = [];
 
 	constructor(mapObj: any, helper: LayersCompositor) {
 		this.map = mapObj;
@@ -180,6 +182,13 @@ class LayerDrawing {
 		if (!videosInfo || videosInfo.length === 0) return;
 		this.videoRenderers.set(slideHash, []);
 
+		if (
+			!this.layerRenderer.getRenderContext().is2dGl() &&
+			!VideoRendererGl.videoProgramInitialized
+		) {
+			VideoRendererGl.createProgram(this.layerRenderer.getRenderContext());
+		}
+
 		for (let i = 0; i < videosInfo.length; ++i) {
 			const videoInfo = videosInfo[i];
 			this.handleVideo(i, slideHash, videoInfo);
@@ -215,12 +224,12 @@ class LayerDrawing {
 		}
 	}
 
-	public playVideos(slideHash: string) {
+	public loadVideos(slideHash: string) {
 		const videoRenderers = this.videoRenderers.get(slideHash);
 		if (!videoRenderers) return;
 
 		for (const videoRenderer of videoRenderers) {
-			videoRenderer.playVideo();
+			videoRenderer.loadVideo();
 		}
 	}
 
@@ -230,6 +239,19 @@ class LayerDrawing {
 
 		for (const videoRenderer of videoRenderers) {
 			videoRenderer.pauseVideo();
+		}
+	}
+
+	public getVideoRenderer(
+		slideHash: string,
+		videoInfo: VideoInfo,
+	): VideoRenderer {
+		const videoRenderers = this.videoRenderers.get(slideHash);
+
+		for (const videoRenderer of videoRenderers) {
+			if (videoRenderer.videoInfoId === videoInfo.id) {
+				return videoRenderer;
+			}
 		}
 	}
 
@@ -313,7 +335,6 @@ class LayerDrawing {
 
 		try {
 			this.layerRenderer = new SlideShow.LayerRendererGl(this.offscreenCanvas);
-			VideoRendererGl.createProgram(this.layerRenderer.getRenderContext());
 		} catch (error) {
 			console.log('LayerDrawing: WebGl offscreen rendering not supported');
 			this.layerRenderer = new SlideShow.LayerRenderer2d(this.offscreenCanvas);
@@ -407,6 +428,10 @@ class LayerDrawing {
 	onSlideLayerMsg(e: any) {
 		if (this.isDisposed()) return;
 
+		if (this.isTransitionActive) {
+			this.queuedLayers.push(e);
+			return;
+		}
 		const info = e.message;
 		if (!info) {
 			window.app.console.log(
@@ -743,10 +768,21 @@ class LayerDrawing {
 		return this.layerRenderer.getRenderContext();
 	}
 
+	public notifyTransitionStart() {
+		this.isTransitionActive = true;
+		this.queuedLayers = [];
+	}
+
 	public notifyTransitionEnd(slideHash: string) {
+		this.isTransitionActive = false;
+		while (this.queuedLayers.length > 0) {
+			const layer = this.queuedLayers.shift();
+			this.onSlideLayerMsg(layer);
+		}
+
 		this.handleVideos(slideHash);
 		if (this.videoRenderers.has(slideHash)) {
-			this.playVideos(slideHash);
+			this.loadVideos(slideHash);
 		}
 	}
 }

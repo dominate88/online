@@ -15,7 +15,7 @@
 
 #include <config.h>
 
-#ifndef __FreeBSD__
+#if HAVE_LIBCAP
 #include <sys/capability.h>
 #endif
 #include <sys/types.h>
@@ -87,7 +87,8 @@ extern "C" { void dump_forkit_state(void); /* easy for gdb */ }
 
 void dump_forkit_state()
 {
-    std::ostringstream oss;
+    std::ostringstream oss(Util::makeDumpStateStream());
+    oss << "Start ForKit " << getpid() << " Dump State:\n";
 
     oss << "Forkit: " << ForkCounter << " forks\n"
         << "  LogLevel: " << LogLevel << "\n"
@@ -105,10 +106,11 @@ void dump_forkit_state()
 
     oss << "\nMalloc info [" << getpid() << "]: \n\t"
         << Util::replace(Util::getMallocInfo(), "\n", "\n\t") << '\n';
+    oss << "\nEnd ForKit " << getpid() << " Dump State.\n";
 
     const std::string msg = oss.str();
     fprintf(stderr, "%s", msg.c_str());
-    LOG_TRC(msg);
+    LOG_WRN(msg);
 }
 
 class ServerWSHandler;
@@ -214,7 +216,7 @@ protected:
     }
 };
 
-#ifndef __FreeBSD__
+#if HAVE_LIBCAP
 static bool haveCapability(cap_value_t capability)
 {
     using ScopedCaps = std::unique_ptr<std::remove_pointer<cap_t>::type, int (*)(void*)>;
@@ -289,7 +291,7 @@ static bool haveCorrectCapabilities()
     // chroot() can only be called by root
     return getuid() == 0;
 }
-#endif // __FreeBSD__
+#endif // HAVE_LIBCAP
 
 /// Check if some previously forked kids have died.
 static void cleanupChildren(const std::string& childRoot)
@@ -304,6 +306,8 @@ static void cleanupChildren(const std::string& childRoot)
     int oomKilledCount = 0;
 
     siginfo_t info;
+    memset(&info, 0, sizeof(info)); // Make sure no stale fields remain
+
     // Reap quickly without doing slow cleanup so WSD can spawn more rapidly.
     while (waitid(P_ALL, -1, &info, WEXITED | WUNTRACED | WNOHANG) == 0)
     {
@@ -379,7 +383,7 @@ static void cleanupChildren(const std::string& childRoot)
         }
         else
         {
-            LOG_ERR("Unknown child " << exitedChildPid << " has exited, with status " << status);
+            LOG_ERR("Unknown child " << exitedChildPid << " has exited, with status: " << status);
         }
     }
 
@@ -459,6 +463,8 @@ static int forkKit(const std::function<void()> &childFunc,
     if (hasWatchDog)
         SocketPoll::PollWatchdog->joinThread();
 
+    Log::preFork();
+
     pid = fork();
     if (!pid)
     {
@@ -514,7 +520,7 @@ static int createLibreOfficeKit(const std::string& childRoot,
                                 bool queryVersion = false)
 {
     // Generate a jail ID to be used for in the jail path.
-    const std::string jailId = Util::rng::getFilename(16);
+    std::string jailId = Util::rng::getFilename(16);
 
     // Update the dynamic files as necessary.
     const bool sysTemplateIncomplete = !JailUtil::SysTemplate::updateDynamicFiles(sysTemplate);
@@ -529,8 +535,8 @@ static int createLibreOfficeKit(const std::string& childRoot,
     pid_t childPid = 0;
     if (Util::isKitInProcess())
     {
-        std::thread([childRoot, jailId, configId, sysTemplate, loTemplate,
-                     queryVersion, sysTemplateIncomplete] {
+        std::thread([childRoot, jailId = std::move(jailId), configId, sysTemplate,
+                     loTemplate, queryVersion, sysTemplateIncomplete] {
             sleepForDebugger();
             lokit_main(childRoot, jailId, configId, sysTemplate, loTemplate, true,
                        true, false, queryVersion, DisplayVersion,
@@ -908,8 +914,7 @@ int forkit_main(int argc, char** argv)
         else if (std::strstr(cmd, "--rlimits") == cmd)
         {
             eq = std::strchr(cmd, '=');
-            const std::string rlimits = std::string(eq+1);
-            StringVector tokens = StringVector::tokenize(rlimits, ';');
+            StringVector tokens = StringVector::tokenize(std::string(eq+1), ';');
             for (const auto& cmdLimit : tokens)
             {
                 const std::pair<std::string, std::string> pair = Util::split(tokens.getParam(cmdLimit), ':');
@@ -1008,7 +1013,7 @@ int forkit_main(int argc, char** argv)
     }
 
     if (Util::ThreadCounter().count() != 1)
-        LOG_ERR("forkit has more than a single thread after pre-init");
+        LOG_ERR("forkit has more than a single thread after pre-init" << Util::ThreadCounter().count());
 
     // Link the network and system files in sysTemplate, if possible.
     JailUtil::SysTemplate::setupDynamicFiles(sysTemplate);

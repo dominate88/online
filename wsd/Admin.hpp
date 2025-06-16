@@ -51,6 +51,9 @@ private:
     Admin* _admin;
     int _sessionId;
     bool _isAuthenticated;
+
+    /// The next unique session-ID.
+    static std::atomic<uint64_t> NextSessionId;
 };
 
 class MonitorSocketHandler : public AdminSocketHandler
@@ -94,16 +97,17 @@ public:
 
     void updateMonitors(std::vector<std::pair<std::string, int>>& oldMonitors);
 
-    std::vector<std::pair<std::string, int>> getMonitorList();
+    std::vector<std::pair<std::string, int>> getMonitorList() const;
 
     /// Custom poll thread function
     void pollingThread() override;
 
-    size_t getTotalMemoryUsage();
+    size_t getTotalMemoryUsage() const;
     /// Takes into account the 'memproportion' property in config file to find the amount of memory
     /// available to us.
-    size_t getTotalAvailableMemory() { return _totalAvailMemKb; }
-    size_t getTotalCpuUsage();
+    size_t getTotalAvailableMemory() const { return _totalAvailMemKb; }
+    size_t getTotalCpuUsage() const;
+    std::time_t getLastActivityTime() const;
 
     void modificationAlert(const std::string& dockey, pid_t pid, bool value);
 
@@ -115,7 +119,8 @@ public:
     /// Calls with same pid will increment view count, if pid already exists
     void addDoc(const std::string& docKey, pid_t pid, const std::string& filename,
                 const std::string& sessionId, const std::string& userName,
-                const std::string& userId, int smapsFD, const std::string& wopiSrc, bool readOnly);
+                const std::string& userId, const std::weak_ptr<FILE>& smapsFD,
+                const std::string& wopiSrc, bool readOnly);
 
     /// Decrement view count till becomes zero after which doc is removed
     void rmDoc(const std::string& docKey, const std::string& sessionId);
@@ -128,19 +133,19 @@ public:
     /// Callers must ensure that modelMutex is acquired
     AdminModel& getModel();
 
-    unsigned getMemStatsInterval();
+    unsigned getMemStatsInterval() const;
 
-    unsigned getCpuStatsInterval();
+    unsigned getCpuStatsInterval() const;
 
-    unsigned getNetStatsInterval();
+    unsigned getNetStatsInterval() const;
 
     /// Returns the log levels of wsd and forkit & kits.
-    std::string getChannelLogLevels();
+    std::string getChannelLogLevels() const;
 
     /// Sets the specified channel's log level (wsd or forkit and kits).
     void setChannelLogLevel(const std::string& channelName, std::string level);
 
-    std::string getLogLines();
+    std::string getLogLines() const;
 
     void rescheduleMemTimer(unsigned interval);
 
@@ -175,7 +180,7 @@ public:
                               unsigned oomKilledCount);
     void addLostKitsTerminated(unsigned lostKitsTerminated);
 
-    void getMetrics(std::ostringstream &metrics);
+    void getMetrics(std::ostream& metrics) const;
 
     /// Will dump the metrics in the log and stderr from the Admin SocketPoll.
     static void dumpMetrics() { instance()._dumpMetrics = true; }
@@ -231,7 +236,7 @@ private:
     size_t _totalAvailMemKb;
 
     size_t _lastTotalMemory;
-    size_t _lastJiffies;
+    mutable size_t _lastJiffies;
     size_t _cleanupIntervalMs;
     uint64_t _lastSentCount;
     uint64_t _lastRecvCount;
@@ -263,8 +268,8 @@ private:
     std::atomic<bool> _closeMonitor = false;
 
     // Don't update any more frequently than this since it's excessive.
-    static const int MinStatsIntervalMs;
-    static const int DefStatsIntervalMs;
+    static constexpr int MinStatsIntervalMs = 50;
+    static constexpr int DefStatsIntervalMs = 1000;
 };
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

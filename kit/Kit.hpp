@@ -358,7 +358,7 @@ private:
     std::shared_ptr<lok::Document> load(const std::shared_ptr<ChildSession>& session,
                                         const std::string& renderOpts);
 
-    bool forwardToChild(const std::string& prefix, const std::vector<char>& payload);
+    bool forwardToChild(const std::string_view prefix, const std::vector<char>& payload);
 
     static std::string makeRenderParams(const std::string& renderOpts, const std::string& userName,
                                         const std::string& spellOnline, const std::string& theme,
@@ -435,10 +435,20 @@ public:
     /// Permanently disable background save for this process
     void disableBgSave(const std::string &reason);
 
+    void bgSaveStarted() { _bgSavesOngoing++; }
+    void bgSaveEnded();
+
     /// Are we currently performing a load ?
     bool isLoadOngoing() const { return _duringLoad > 0; }
 
     LogUiCmd& getLogUiCmd() { return logUiCmd; }
+
+    /// Get a thread-pool to perform an operation in
+    /// all operations must complete by the time we
+    /// return to the poll
+    ThreadPool& getSyncPool() { return _deltaPool; }
+
+    int getViewsCount() const;
 
 private:
     void postForceModifiedCommand(bool modified);
@@ -473,6 +483,7 @@ private:
     ModifiedState _modified;
     bool _isBgSaveProcess;
     bool _isBgSaveDisabled;
+    bool _trimIfInactivePostponed;
 
     // Document password provided
     std::string _docPassword;
@@ -507,6 +518,7 @@ private:
 
     const unsigned _mobileAppDocId;
     int _duringLoad;
+    int _bgSavesOngoing;
 
     LogUiCmd logUiCmd;
 };

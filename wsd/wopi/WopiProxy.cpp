@@ -36,9 +36,17 @@ void WopiProxy::handleRequest([[maybe_unused]] const std::shared_ptr<Terminating
     }
 
     LOG_INF("URL [" << url << "] for WS Request.");
+
+    std::shared_ptr<StreamSocket> socket = _socket.lock();
+    if (!socket)
+    {
+        LOG_ERR("Invalid socket while handling wopi proxy request for [" << COOLWSD::anonymizeUrl(url) << ']');
+        return;
+    }
+
     const auto uriPublic = RequestDetails::sanitizeURI(url);
     std::string docKey = RequestDetails::getDocKey(uriPublic);
-    const std::string fileId = Uri::getFilenameFromURL(docKey);
+    const std::string fileId = Uri::getFilenameFromURL(Uri::decode(docKey));
     Anonymizer::mapAnonymized(fileId,
                               fileId); // Identity mapping, since fileId is already obfuscated
 
@@ -60,16 +68,25 @@ void WopiProxy::handleRequest([[maybe_unused]] const std::shared_ptr<Terminating
         case StorageBase::StorageType::Unsupported:
             LOG_ERR("Unsupported URI [" << COOLWSD::anonymizeUrl(uriPublic.toString())
                                         << "] or no storage configured");
-            throw BadRequestException("No Storage configured or invalid URI " +
+            throw BadRequestException("No Storage configured or invalid URI [" +
                                       COOLWSD::anonymizeUrl(uriPublic.toString()) + ']');
-
             break;
+
         case StorageBase::StorageType::Unauthorized:
             LOG_ERR("No authorized hosts found matching the target host [" << uriPublic.getHost()
                                                                            << "] in config");
-            HttpHelper::sendErrorAndShutdown(http::StatusCode::Unauthorized, _socket);
+            HttpHelper::sendErrorAndShutdown(http::StatusCode::Unauthorized, socket);
             break;
 
+        case StorageBase::StorageType::Conversion:
+            // We don't expect conversion requests.
+            LOG_ERR("Unsupported URI [" << COOLWSD::anonymizeUrl(uriPublic.toString())
+                                        << "] for conversion");
+            throw BadRequestException("Invalid URI for conversion [" +
+                                      COOLWSD::anonymizeUrl(uriPublic.toString()) + ']');
+            break;
+
+#if ENABLE_LOCAL_FILESYSTEM
         case StorageBase::StorageType::FileSystem:
         {
             LOG_INF("URI [" << COOLWSD::anonymizeUrl(uriPublic.toString()) << "] on docKey ["
@@ -82,14 +99,16 @@ void WopiProxy::handleRequest([[maybe_unused]] const std::shared_ptr<Terminating
                 http::Response response(http::StatusCode::OK);
                 response.setBody(std::string(data->data(), data->size()),
                                  "application/octet-stream");
-                _socket->sendAndShutdown(response);
+                socket->sendAndShutdown(response);
             }
             else
             {
-                HttpHelper::sendErrorAndShutdown(http::StatusCode::NotFound, _socket);
+                HttpHelper::sendErrorAndShutdown(http::StatusCode::NotFound, socket);
             }
             break;
         }
+#endif // ENABLE_LOCAL_FILESYSTEM
+
 #if !MOBILEAPP
         case StorageBase::StorageType::Wopi:
             LOG_INF("URI [" << COOLWSD::anonymizeUrl(uriPublic.toString()) << "] on docKey ["
@@ -120,6 +139,13 @@ void WopiProxy::checkFileInfo(const std::shared_ptr<TerminatingPoll>& poll, cons
     {
         const std::string uriAnonym = COOLWSD::anonymizeUrl(uri.toString());
 
+        std::shared_ptr<StreamSocket> socket = _socket.lock();
+        if (!socket)
+        {
+            LOG_ERR("Invalid socket while handling wopi CheckFileInfo for [" << uriAnonym << ']');
+            return;
+        }
+
         assert(&checkFileInfo == _checkFileInfo.get() && "Unknown CheckFileInfo instance");
         if (_checkFileInfo && _checkFileInfo->state() == CheckFileInfo::State::Pass &&
             _checkFileInfo->wopiInfo())
@@ -133,9 +159,8 @@ void WopiProxy::checkFileInfo(const std::shared_ptr<TerminatingPoll>& poll, cons
             JsonUtil::findJSONValue(object, "BaseFileName", filename);
             JsonUtil::findJSONValue(object, "LastModifiedTime", lastModifiedTime);
 
-            LocalStorage::FileInfo fileInfo =
-                LocalStorage::FileInfo({ size, std::move(filename), std::move(ownerId),
-                                         std::move(lastModifiedTime) });
+            const StorageBase::FileInfo fileInfo(size, std::move(filename), std::move(ownerId),
+                                                 std::move(lastModifiedTime));
 
             // if (COOLWSD::AnonymizeUserData)
             //     Anonymizer::mapAnonymized(Uri::getFilenameFromURL(filename),
@@ -191,7 +216,7 @@ void WopiProxy::checkFileInfo(const std::shared_ptr<TerminatingPoll>& poll, cons
         }
 
         LOG_ERR("Invalid URI or access denied to [" << uriAnonym << ']');
-        HttpHelper::sendErrorAndShutdown(http::StatusCode::Unauthorized, _socket);
+        HttpHelper::sendErrorAndShutdown(http::StatusCode::Unauthorized, socket);
     };
 
     // CheckFileInfo asynchronously.
@@ -215,12 +240,19 @@ void WopiProxy::download(const std::shared_ptr<TerminatingPoll>& poll, const std
                                                      << httpRequest.header());
 
     http::Session::FinishedCallback finishedCallback =
-        [this, &poll, startTime, url, uriPublic, uriAnonym=std::move(uriAnonym),
+        [this, &poll, startTime, url, uriAnonym=std::move(uriAnonym),
          redirectLimit](const std::shared_ptr<http::Session>& session)
     {
         if (SigUtil::getShutdownRequestFlag())
         {
             LOG_DBG("Shutdown flagged, giving up on in-flight requests");
+            return;
+        }
+
+        std::shared_ptr<StreamSocket> socket = _socket.lock();
+        if (!socket)
+        {
+            LOG_ERR("Invalid socket while downloading [" << uriAnonym << ']');
             return;
         }
 
@@ -283,18 +315,18 @@ void WopiProxy::download(const std::shared_ptr<TerminatingPoll>& poll, const std
             if (httpResponse->statusLine().statusCode() == http::StatusCode::Forbidden)
             {
                 LOG_ERR("Access denied to [" << uriAnonym << ']');
-                HttpHelper::sendErrorAndShutdown(http::StatusCode::Forbidden, _socket);
+                HttpHelper::sendErrorAndShutdown(http::StatusCode::Forbidden, socket);
                 return;
             }
 
             LOG_ERR("Invalid URI or access denied to [" << uriAnonym << ']');
-            HttpHelper::sendErrorAndShutdown(http::StatusCode::Unauthorized, _socket);
+            HttpHelper::sendErrorAndShutdown(http::StatusCode::Unauthorized, socket);
             return;
         }
 
         http::Response response(http::StatusCode::OK);
         response.setBody(httpResponse->getBody(), "application/octet-stream");
-        _socket->sendAndShutdown(response);
+        socket->sendAndShutdown(response);
     };
 
     _httpSession->setFinishedHandler(std::move(finishedCallback));

@@ -660,6 +660,10 @@ app.definitions.Socket = L.Class.extend({
 		textMsg = e.textMsg;
 		imgBytes = e.imgBytes;
 
+		if (window.L.Browser.cypressTest) {
+			window.L.initial._stubMessage(textMsg);
+		}
+
 		this._logSocket('INCOMING', textMsg);
 
 		var command = this.parseServerCmd(textMsg);
@@ -765,7 +769,7 @@ app.definitions.Socket = L.Class.extend({
 			if (parseInt(h,16).toString(16) === h.toLowerCase().replace(/^0+/, '')) {
 				const anchor = document.createElement('a');
 				anchor.setAttribute('target', '_blank');
-				anchor.setAttribute('href', 'https://hub.libreoffice.org/git-core/' + h);
+				anchor.setAttribute('href', 'https://git.libreoffice.org/core/+log/' + lokitVersionObj.BuildId + '/');
 				anchor.textContent = 'git hash: ' + h;
 
 				const span = document.createElement('span');
@@ -1471,12 +1475,13 @@ app.definitions.Socket = L.Class.extend({
 			} else if (textMsg.startsWith('saveas:')) {
 				var accessToken = this._getParameterByName(url, 'access_token');
 				var accessTokenTtl = this._getParameterByName(url, 'access_token_ttl');
+				let noAuthHeader = this._getParameterByName(url, 'no_auth_header');
 
 				if (accessToken !== undefined) {
 					if (accessTokenTtl === undefined) {
 						accessTokenTtl = 0;
 					}
-					this._map.options.docParams = { 'access_token': accessToken, 'access_token_ttl': accessTokenTtl };
+					this._map.options.docParams = { 'access_token': accessToken, 'access_token_ttl': accessTokenTtl, 'no_auth_header': noAuthHeader };
 				}
 				else {
 					this._map.options.docParams = {};
@@ -1588,7 +1593,7 @@ app.definitions.Socket = L.Class.extend({
 			this._map.uiManager.setCanvasColorAfterModeChange();
 
 			var uiMode = this._map.uiManager.getCurrentMode();
-			if (uiMode === 'notebookbar') {
+			if (uiMode === 'notebookbar' && this._map.uiManager.notebookbar) {
 				this._map.uiManager.notebookbar.resetInCore();
 				this._map.uiManager.notebookbar.initializeInCore();
 			}

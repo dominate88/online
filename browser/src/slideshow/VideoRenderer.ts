@@ -19,6 +19,7 @@ class VideoRenderInfo {
 	private vao: WebGLVertexArrayObject = null;
 	public pos2d: number[];
 	public playing: boolean;
+	public ended: boolean;
 
 	public getTexture(): WebGLTexture {
 		return this.texture;
@@ -49,6 +50,7 @@ abstract class VideoRenderer {
 	protected _context: RenderContext;
 	protected _slideRenderer: SlideRenderer;
 	protected videoRenderInfo: VideoRenderInfo;
+	public videoInfoId: number;
 
 	constructor(
 		sId: string,
@@ -70,6 +72,11 @@ abstract class VideoRenderer {
 		docHeight: number,
 	): void;
 
+	public loadVideo() {
+		if (!this.videoRenderInfo) return;
+		this.videoRenderInfo.videoElement.load();
+	}
+
 	public playVideo(reset: boolean = true) {
 		if (!this.videoRenderInfo) return;
 		if (reset) this.videoRenderInfo.videoElement.currentTime = 0;
@@ -88,6 +95,16 @@ abstract class VideoRenderer {
 		this.videoRenderInfo.deleteResources(this._context);
 	}
 
+	public handleClick(): void {
+		if (this.videoRenderInfo.playing) {
+			this.pauseVideo();
+		} else if (this.videoRenderInfo.ended) {
+			this.playVideo(true);
+		} else {
+			this.playVideo(false);
+		}
+	}
+
 	protected setupVideo(
 		videoRenderInfo: VideoRenderInfo,
 		url: string,
@@ -95,13 +112,13 @@ abstract class VideoRenderer {
 		const video = document.createElement('video');
 
 		video.playsInline = true;
-		video.loop = true;
 		video.crossOrigin = 'anonymous';
 
 		video.addEventListener(
 			'playing',
 			() => {
 				videoRenderInfo.playing = true;
+				videoRenderInfo.ended = false;
 				this._slideRenderer.notifyVideoStarted(this.sId);
 			},
 			true,
@@ -111,6 +128,16 @@ abstract class VideoRenderer {
 			'pause',
 			() => {
 				videoRenderInfo.playing = false;
+				this._slideRenderer.notifyVideoEnded(this.sId);
+			},
+			true,
+		);
+
+		video.addEventListener(
+			'ended',
+			() => {
+				videoRenderInfo.playing = false;
+				videoRenderInfo.ended = true;
 				this._slideRenderer.notifyVideoEnded(this.sId);
 			},
 			true,
@@ -159,6 +186,7 @@ class VideoRenderer2d extends VideoRenderer {
 			docHeight,
 		);
 		this.videoRenderInfo = video;
+		this.videoInfoId = videoInfo.id;
 	}
 
 	public render(): void {
@@ -181,6 +209,7 @@ class VideoRenderer2d extends VideoRenderer {
 
 class VideoRendererGl extends VideoRenderer {
 	private static _program: WebGLProgram;
+	public static videoProgramInitialized: boolean = false;
 
 	private static getVertexShader(): string {
 		return `#version 300 es
@@ -224,6 +253,8 @@ class VideoRendererGl extends VideoRenderer {
 			vertexShader,
 			fragmentShader,
 		);
+
+		VideoRendererGl.videoProgramInitialized = true;
 	}
 
 	public static deleteProgram(context: RenderContextGl) {
@@ -231,6 +262,7 @@ class VideoRendererGl extends VideoRenderer {
 		const gl = context.getGl();
 		gl.deleteProgram(VideoRendererGl._program);
 		VideoRendererGl._program = null;
+		VideoRendererGl.videoProgramInitialized = false;
 	}
 
 	public prepareVideo(
@@ -255,6 +287,7 @@ class VideoRendererGl extends VideoRenderer {
 			),
 		);
 		this.videoRenderInfo = video;
+		this.videoInfoId = videoInfo.id;
 	}
 
 	private initTexture() {
@@ -376,7 +409,7 @@ class VideoRendererGl extends VideoRenderer {
 		gl.activeTexture(gl.TEXTURE0);
 
 		const video = this.videoRenderInfo;
-		if (video.playing && video.videoElement.currentTime > 0) {
+		if (!video.ended && video.videoElement.currentTime > 0) {
 			gl.bindVertexArray(video.getVao());
 			gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
 			this.updateTexture(video.getTexture(), video.videoElement);

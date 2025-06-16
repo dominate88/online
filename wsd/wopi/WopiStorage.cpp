@@ -90,6 +90,36 @@ private:
     TCallback _callback;
     TArg _arg;
 };
+
+void anonymizeAvatarURL(Poco::JSON::Object::Ptr& userExtraInfo)
+{
+    auto avatarURL = userExtraInfo->getValue<std::string>("avatar");
+    if (!avatarURL.empty())
+    {
+        const std::string avatar_path = "/avatar/";
+        std::size_t startPos = avatarURL.find(avatar_path) + avatar_path.length();
+        std::size_t endPos = avatarURL.find("/", startPos);
+
+        if (startPos != std::string::npos && endPos != std::string::npos)
+        {
+            std::string avatarUserName = avatarURL.substr(startPos, endPos - startPos);
+            avatarURL.replace(startPos, endPos - startPos, COOLWSD::anonymizeUsername(avatarUserName));
+        }
+        userExtraInfo->set("avatar", avatarURL);
+    }
+}
+
+void anonymizeUserPrivateInfo(Poco::JSON::Object::Ptr& userPrivateInfo)
+{
+    auto keys = userPrivateInfo->getNames();
+    for (const auto& key : keys)
+    {
+        auto value = userPrivateInfo->getValue<std::string>(key);
+        if(!value.empty())
+            userPrivateInfo->set(key, COOLWSD::anonymizeUsername(value));
+    }
+}
+
 } // anonymous namespace
 
 void WopiStorage::handleWOPIFileInfo(const WOPIFileInfo& wopiFileInfo, LockContext& lockCtx)
@@ -155,6 +185,16 @@ WopiStorage::WOPIFileInfo::WOPIFileInfo(const FileInfo& fileInfo, Poco::JSON::Ob
             object->set("OwnerId", COOLWSD::anonymizeUsername(getOwnerId()));
             object->set("UserId", COOLWSD::anonymizeUsername(_userId));
             object->set("UserFriendlyName", COOLWSD::anonymizeUsername(_username));
+        }
+
+        if (auto userExtraInfo = object->getObject("UserExtraInfo"))
+        {
+            anonymizeAvatarURL(userExtraInfo);
+        }
+
+        if (auto userPrivateInfo = object->getObject("UserPrivateInfo"))
+        {
+            anonymizeUserPrivateInfo(userPrivateInfo);
         }
     }
     object->stringify(wopiResponse);
@@ -675,7 +715,7 @@ std::size_t WopiStorage::uploadLocalFileToStorageAsync(
     const std::shared_ptr<SocketPoll>& socketPoll, const AsyncUploadCallback& asyncUploadCallback)
 {
     auto profileZone =
-        std::make_shared<ProfileZone>(std::string("WopiStorage::uploadLocalFileToStorage"),
+        std::make_shared<ProfileZone>(std::string("WopiStorage::uploadLocalFileToStorageAsync"),
                                       std::map<std::string, std::string>({ { "url", _fileUrl } }));
 
     // TODO: Check if this URI has write permission (canWrite = true)
@@ -692,7 +732,7 @@ std::size_t WopiStorage::uploadLocalFileToStorageAsync(
 
     const bool isSaveAs = !saveAsPath.empty() && !saveAsFilename.empty();
     const std::string filePath(isSaveAs ? saveAsPath : getRootFilePathUploading());
-    const std::string filePathAnonym = COOLWSD::anonymizeUrl(filePath);
+    std::string filePathAnonym = COOLWSD::anonymizeUrl(filePath);
 
     const FileUtil::Stat fileStat(filePath);
     if (!fileStat.good())
@@ -711,7 +751,7 @@ std::size_t WopiStorage::uploadLocalFileToStorageAsync(
                                            : uriObject.getPath() + "/contents");
     auth.authorizeURI(uriObject);
 
-    const std::string uriAnonym = COOLWSD::anonymizeUrl(uriObject.toString());
+    std::string uriAnonym = COOLWSD::anonymizeUrl(uriObject.toString());
 
     const std::string wopiLog(isSaveAs ? "WOPI::PutRelativeFile"
                                        : (isRename ? "WOPI::RenameFile" : "WOPI::PutFile"));
@@ -827,7 +867,7 @@ std::size_t WopiStorage::uploadLocalFileToStorageAsync(
                                           isRename };
 
             // Handle the response.
-            const StorageBase::UploadResult res =
+            StorageBase::UploadResult res =
                 handleUploadToStorageResponse(details, httpResponse->getBody());
 
             // Fire the callback to our client (DocBroker, typically).

@@ -14,9 +14,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <filesystem>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -257,7 +257,7 @@ public:
                        SocketDisposition::MoveFunction transferFn);
 
     /// setup the transfer of a socket into this DocumentBroker poll.
-    void setupTransfer(const std::shared_ptr<StreamSocket>& socket,
+    void setupTransfer(SocketPoll& from, const std::weak_ptr<StreamSocket>& socket,
                        const SocketDisposition::MoveFunction& transferFn);
 
     /// Flag for termination. Note that this doesn't save any unsaved changes in the document
@@ -419,7 +419,7 @@ public:
     };
     void handleClipboardRequest(ClipboardRequest type,  const std::shared_ptr<StreamSocket> &socket,
                                 const std::string &viewId, const std::string &tag,
-                                const std::shared_ptr<std::string> &data);
+                                const std::string &clipFile);
     static bool lookupSendClipboardTag(const std::shared_ptr<StreamSocket> &socket,
                                        const std::string &tag, bool sendError = false);
 
@@ -524,6 +524,8 @@ public:
     void removeEmbeddedMedia(const std::string& json);
 
     std::string getEmbeddedMediaPath(const std::string& id);
+    /// Returns the absolute media path given the local path of the media file.
+    std::string getAbsoluteMediaPath(std::string localPath);
 
     void onUrpMessage(const char* data, size_t len);
 
@@ -582,7 +584,7 @@ public:
                                    const std::function<void(const std::string&, bool)>& finishedCB,
                                    const std::shared_ptr<ClientSession>& session);
 
-    static Poco::URI getPresetUploadBaseUrl(Poco::URI uri);
+    static Poco::URI getPresetUploadBaseUrl(const Poco::URI& uri);
 
     static std::shared_ptr<const http::Response> sendHttpSyncRequest(const std::string& url,
                                                                      const std::string& logContext);
@@ -650,10 +652,11 @@ private:
     /// Returns false on failure/unauthorized.
     bool handleLockResult(ClientSession& session, const StorageBase::LockUpdateResult& result);
 
-    std::size_t getIdleTimeSecs() const
+    /// Returns the time elapsed since the last user activity.
+    std::chrono::milliseconds getIdleTime() const
     {
         const auto duration = (std::chrono::steady_clock::now() - _lastActivityTime);
-        return std::chrono::duration_cast<std::chrono::seconds>(duration).count();
+        return std::chrono::duration_cast<std::chrono::milliseconds>(duration);
     }
 
     void handleTileResponse(const std::shared_ptr<Message>& message);
@@ -1651,6 +1654,12 @@ private:
     /// Called when document conflict is detected (i.e. it changed in storage).
     void handleDocumentConflict();
 
+    /// if _isViewSettingsAccessibilityEnabled is set then set
+    /// accessibilityState=true in @message and force-enable
+    /// accessibility on for viewId
+    std::string applyViewAccessibility(const std::string& message,
+                                       const std::string& viewId);
+
     /// What type are we: affects priority.
     const Poco::URI _uriPublic;
 
@@ -1781,6 +1790,8 @@ private:
     /// True for file that COOLWSD::IsViewFileExtension return true.
     /// These files, such as PDF, don't have a reliable ModifiedStatus.
     bool _isViewFileExtension;
+
+    bool _isViewSettingsAccessibilityEnabled;
 
     /// True iff the config per_document.always_save_on_exit is true.
     const bool _alwaysSaveOnExit : 1;

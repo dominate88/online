@@ -41,21 +41,24 @@ JSDialog.panel = function (
 	data: PanelWidgetJSON,
 	builder: JSBuilder,
 ) {
-	// we want to show the contents always, hidden property decides if we collapse the panel
-	if (data.children && data.children.length) data.children[0].visible = true;
-
 	var expanderData: ExpanderWidgetJSON = data;
 	expanderData.type = 'expander';
 	expanderData.children = ([{ text: data.text }] as Array<any>).concat(
 		data.children,
 	);
-	expanderData.id = data.id + 'PanelExpander';
-	// FIXME: use getter for handlers
-	builder._expanderHandler(parentContainer, expanderData, builder, () => {
-		expanderData; /*do nothing*/
-	});
+
+	builder._controlHandlers['expander'](
+		parentContainer,
+		expanderData,
+		builder,
+		() => {
+			expanderData; /*do nothing*/
+		},
+	);
 
 	var expander = $(parentContainer).children('#' + expanderData.id);
+
+	if (data.name) L.DomUtil.addClass(expander.get(0), data.name);
 	if (expanderData.hidden === true) expander.hide();
 
 	if (expanderData.command) {
@@ -65,20 +68,17 @@ JSDialog.panel = function (
 			'ui-expander-icon-right ' + builder.options.cssClass,
 			iconParent,
 		);
+		const moreOptionsText = expanderData.children[0].text
+			? _('More options for {1}').replace('{1}', expanderData.children[0].text)
+			: '';
 		builder._controlHandlers['toolitem'](
 			icon,
 			{
 				type: 'toolitem',
 				command: expanderData.command,
-				aria: {
-					label: expanderData.children[0].text
-						? _('More options for {name}').replace(
-								'{name}',
-								expanderData.children[0].text,
-							)
-						: '',
-				},
+				aria: { label: moreOptionsText },
 				icon: app.LOUtil.getIconNameOfCommand('morebutton'),
+				tooltip: moreOptionsText,
 			},
 			builder,
 		);

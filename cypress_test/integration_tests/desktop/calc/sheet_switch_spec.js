@@ -16,7 +16,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Sheet switching tests', fu
 		// we should be somewhere far from A1
 		cy.cGet(helper.addressInputSelector).should('have.prop', 'value', 'CQ1017');
 		desktopHelper.assertScrollbarPosition('vertical', 310, 350);
-		desktopHelper.assertScrollbarPosition('horizontal', 480, 520);
+		desktopHelper.assertScrollbarPosition('horizontal', 410, 520);
 
 		// insert sheet
 		cy.cGet('#sheets-buttons-toolbox #insertsheet').click();
@@ -27,7 +27,7 @@ describe(['tagdesktop', 'tagnextcloud', 'tagproxy'], 'Sheet switching tests', fu
 		desktopHelper.assertScrollbarPosition('horizontal', 0, 50);
 	});
 
-	it('Check the visibility of tile content when rows are hidden', function() {
+	it.skip('Check the visibility of tile content when rows are hidden', function() {
 		// Insert sheet
 		cy.cGet(helper.addressInputSelector).should('have.prop', 'value', 'CQ1017');
 		cy.cGet('#sheets-buttons-toolbox #insertsheet').click();

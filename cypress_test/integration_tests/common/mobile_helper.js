@@ -104,7 +104,6 @@ function closeHamburgerMenu() {
 function openMobileWizard() {
 	cy.log('>> openMobileWizard - start');
 
-	helper.waitUntilIdle('#toolbar-up #mobile_wizard');
 	// Open mobile wizard
 	cy.cGet('#toolbar-up #mobile_wizard')
 		.should('not.have.class', 'disabled')
@@ -229,7 +228,7 @@ function openTextPropertiesPanel() {
 
 	openMobileWizard();
 
-	cy.cGet('#TextPropertyPanel').click();
+	cy.cGet('#TextPropertyPanel, .TextPropertyPanel').click();
 
 	cy.cGet('#Bold').should('be.visible');
 
@@ -311,6 +310,7 @@ function insertComment(skipCommentCheck = false) {
 	cy.cGet('.cool-annotation-table').should('exist');
 	cy.cGet('#input-modal-input').type('some text');
 	cy.cGet('#response-ok').click();
+	cy.wait(2000); // FIXME: skip DocModified message
 
 	if (!skipCommentCheck) {
 		cy.cGet('[id^=comment-container-]').should('exist').wait(300);
@@ -342,7 +342,6 @@ function insertImage() {
 function deleteImage() {
 	cy.log('>> deleteImage - start');
 
-	insertImage();
 	var eventOptions = {
 		force: true,
 		button: 0,

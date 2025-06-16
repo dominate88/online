@@ -13,7 +13,7 @@
  * Calc tile layer is used to display a spreadsheet document
  */
 
-/* global app CPolyUtil CPolygon TileManager cool */
+/* global app TileManager cool FocusCellSection SplitterLinesSection */
 
 L.CalcTileLayer = L.CanvasTileLayer.extend({
 	options: {
@@ -86,11 +86,15 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		}.bind(this));
 
 		app.sectionContainer.addSection(new app.definitions.AutoFillMarkerSection());
+		app.sectionContainer.addSection(new SplitterLinesSection());
 
 		this.insertMode = false;
 		this._resetInternalState();
 		this._sheetSwitch = new L.SheetSwitchViewRestore(map);
 		this._sheetGrid = true;
+
+		if (window.prefs.getBoolean('ColumnRowHighlightEnabled', false))
+			FocusCellSection.addFocusCellSection();
 	},
 
 	_resetInternalState: function() {
@@ -183,8 +187,7 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 	},
 
 	_restrictDocumentSize: function () {
-
-		if (!this.sheetGeometry) {
+		if (!this.sheetGeometry || !this._lastColumn || !this._lastRow) {
 			return;
 		}
 
@@ -283,15 +286,6 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		};
 	},
 
-	/// take into account only data area to reduce scrollbar range
-	updateScrollLimit: function () {
-		if (this.sheetGeometry
-			&& this._lastColumn !== undefined && this._lastColumn !== null
-			&& this._lastRow !== undefined && this._lastRow !== null) {
-			this._restrictDocumentSize();
-		}
-	},
-
 	_hasPartsCountOrNamesChanged(lastStatusJSON, statusJSON) {
 		if (!lastStatusJSON)
 			return true;
@@ -388,8 +382,8 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 
 		// Document container size is up to date as of now.
 		const documentContainerSize = this._getDocumentContainerSize();
-		documentContainerSize[0] = Math.round(app.dpiScale * documentContainerSize[0]);
-		documentContainerSize[1] = Math.round(app.dpiScale * documentContainerSize[1]);
+		documentContainerSize[0] *= app.dpiScale;
+		documentContainerSize[1] *= app.dpiScale;
 
 		// Size has changed. Our map and canvas are not resized yet.
 		// But the row header, row group, column header and column group sections don't need to be resized.
@@ -402,25 +396,25 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 
 		const mapElement = document.getElementById('map'); // map's size = tiles section's size.
 		const oldMapSize = [mapElement.clientWidth, mapElement.clientHeight];
+		const widthIncreased = oldMapSize[0] < newMapSize[0];
+		const heightIncreased = oldMapSize[1] < newMapSize[1];
+		const sizeChanged = oldMapSize[0] !== newMapSize[0] || oldMapSize[1] !== newMapSize[1];
 
 		// Early exit. If there is no need to update the size, return here.
-		if (oldMapSize[0] === newMapSize[0] && oldMapSize[1] === newMapSize[1])
-			return false;
-		else {
+		if (sizeChanged) {
 			this._resizeMapElementAndTilesLayer(mapElement, marginLeft, marginTop, newMapSize);
 
-			const widthIncreased = oldMapSize[0] < newMapSize[0];
-			const heightIncreased = oldMapSize[1] < newMapSize[1];
-
-			this._map.invalidateSize({}, new L.Point(oldMapSize[0], oldMapSize[1]));
+			this._map.invalidateSize(false, new L.Point(oldMapSize[0], oldMapSize[1]));
 			app.sectionContainer.onResize(newCanvasSize[0], newCanvasSize[1]); // Canvas's size = documentContainer's size.
 			this._updateHeaderSections();
 
 			this._mobileChecksAfterResizeEvent(heightIncreased);
+		}
 
-			// Center the view w.r.t the new map-pane position using the current zoom.
-			this._map.setView(this._map.getCenter());
+		// Center the view w.r.t the new map-pane position using the current zoom.
+		this._map.setView(this._map.getCenter());
 
+		if (sizeChanged) {
 			// We want to keep cursor visible when we show the keyboard on mobile device or tablet
 			this._nonDesktopChecksAfterResizeEvent(heightIncreased);
 
@@ -429,9 +423,9 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 				this._map.fire('sizeincreased');
 				return true;
 			}
-
-			return false;
 		}
+
+		return false;
 	},
 
 	_onStatusMsg: function (textMsg) {
@@ -452,6 +446,9 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 			app.file.size.y = statusJSON.height;
 
 			app.view.size = app.file.size.clone();
+
+			if (app.map._docLoaded)
+				this._syncTileContainerSize();
 
 			this._docType = statusJSON.type;
 			this._parts = statusJSON.partscount;
@@ -1084,88 +1081,19 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		}
 	},
 
+	allowDrawing: function () {
+		// Drawing is disabled from CalcTileLayer construction, enable it now.
+		this._gotFirstCellCursor = true;
+	},
+
 	_onCellCursorMsg: function (textMsg) {
 		L.CanvasTileLayer.prototype._onCellCursorMsg.call(this, textMsg);
 		this._refreshRowColumnHeaders();
 		if (!this._gotFirstCellCursor) {
-			// Drawing is disabled from CalcTileLayer construction, enable it now.
-			this._gotFirstCellCursor = true;
+			this.allowDrawing();
 			TileManager.update();
 			this.enableDrawing();
 		}
-		if (this._map.uiManager.getHighlightMode()) {
-			if (!textMsg.match('EMPTY'))
-				this._highlightColAndRow(textMsg);
-		}
-	},
-
-	updateHighlight: function () {
-		if ( this._map) {
-			if (this._map.uiManager.getHighlightMode()) {
-				var updateMsg = 'updateHighlight';
-				this._highlightColAndRow(updateMsg);
-			}
-			else
-				this._resetReferencesMarks('focuscell');
-		}
-	},
-
-	_highlightColAndRow: function (textMsg) {
-		var strTwips = [];
-		if(textMsg.startsWith('updateHighlight')) {
-			strTwips[0] = app.calc.cellCursorTopLeftTwips.x;
-			strTwips[1] = app.calc.cellCursorTopLeftTwips.y;
-			strTwips[2] = app.calc.cellCursorOffset.x;
-			strTwips[3] = app.calc.cellCursorOffset.y;
-		}
-		else
-			strTwips = textMsg.match(/\d+/g);
-
-		this._resetReferencesMarks('focuscell');
-		var references = [];
-		var rectangles = [];
-		var strColor = getComputedStyle(document.documentElement).getPropertyValue('--column-row-highlight');
-		var maxCol = 268435455;
-		var maxRow = 20971124;
-		var part = this._selectedPart;
-		var topLeftTwips, offset, boundsTwips;
-
-		for(let i = 0; i < 2; i++) {
-			if (i == 0) {
-				// Column rectangle
-				topLeftTwips = new L.Point(parseInt(strTwips[0]), parseInt(0));
-				offset = new L.Point(parseInt(strTwips[2]), parseInt(maxCol));
-				boundsTwips = this._convertToTileTwipsSheetArea(
-					new L.Bounds(topLeftTwips, topLeftTwips.add(offset)));
-				rectangles.push([boundsTwips.getBottomLeft(), boundsTwips.getBottomRight(),
-				boundsTwips.getTopLeft(), boundsTwips.getTopRight()]);
-			} else {
-				// Row rectangle
-				topLeftTwips = new L.Point(parseInt(0), parseInt(strTwips[1]));
-				offset = new L.Point(parseInt(maxRow), parseInt(strTwips[3]));
-				boundsTwips = this._convertToTileTwipsSheetArea(
-					new L.Bounds(topLeftTwips, topLeftTwips.add(offset)));
-				rectangles.push([boundsTwips.getBottomLeft(), boundsTwips.getBottomRight(),
-					boundsTwips.getTopLeft(), boundsTwips.getTopRight()]);
-			}
-
-		    var docLayer = this;
-		    var pointSet = CPolyUtil.rectanglesToPointSet(rectangles, function (twipsPoint) {
-				var corePxPt = docLayer._twipsToCorePixels(twipsPoint);
-				corePxPt.round();
-				return corePxPt;
-			});
-			var reference = new CPolygon(pointSet, {
-				pointerEvents: 'none',
-				fillColor: strColor,
-				fillOpacity: 0.15,
-				weight: 2 * app.dpiScale,
-				opacity: 0.15});
-
-			references.push({mark: reference, part: part, type: 'focuscell'});
-			this._referencesAll.push(references[i]);
-		}
-		this._updateReferenceMarks();
 	},
 
 	_getEditCursorRectangle: function (msgObj) {
@@ -1262,7 +1190,7 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		var scroll = new app.definitions.simplePoint(0, 0);
 
 		if (!app.calc.cellCursorVisible) {
-			return new L.LatLng(0, 0);
+			return scroll;
 		}
 
 		let paneRectangles = app.getViewRectangles(); // SimpleRectangle array.
@@ -1273,14 +1201,14 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		}
 
 		if (contained)
-			return new L.LatLng(0, 0); // No scroll needed.
+			return scroll; // No scroll needed.
 
 		var noSplit = !this._splitPanesContext || this._splitPanesContext.getSplitPos().equals(new L.Point(0, 0));
 
 		// No split panes. Check if target cell is bigger than screen but partially visible.
 		if (noSplit && app.calc.cellCursorRectangle.intersectsRectangle(paneRectangles[0].toArray())) {
 			if (app.calc.cellCursorRectangle.width > paneRectangles[0].width || app.calc.cellCursorRectangle.height > paneRectangles[0].height)
-				return new L.LatLng(0, 0); // no scroll needed.
+				return scroll; // no scroll needed.
 		}
 
 		let freePane = paneRectangles[paneRectangles.length - 1]; // Last pane, this should be the scrollable - not frozen one.
@@ -1288,35 +1216,29 @@ L.CalcTileLayer = L.CanvasTileLayer.extend({
 		// Horizontal split
 		if (app.calc.cellCursorRectangle.x2 > app.calc.splitCoordinate.x) {
 			if (app.calc.cellCursorRectangle.width > freePane.width)
-				return new L.LatLng(0, 0); // no scroll needed.
-
-			var spacingX = app.calc.cellCursorRectangle.width / 4.0;
+				return scroll; // no scroll needed.
 
 			if (app.calc.cellCursorRectangle.x1 < freePane.x1) {
-				scroll.x = app.calc.cellCursorRectangle.x1 - freePane.x1 - spacingX;
+				scroll.x = app.calc.cellCursorRectangle.x1 - freePane.x1;
 			}
 			else if (app.calc.cellCursorRectangle.x2 > freePane.x2) {
-				scroll.x = app.calc.cellCursorRectangle.x2 - freePane.x2 + spacingX;
+				scroll.x = app.calc.cellCursorRectangle.x2 - freePane.x2;
 			}
 		}
 
 		// Vertical split
 		if (app.calc.cellCursorRectangle.y2 > app.calc.splitCoordinate.y) {
 			if (app.calc.cellCursorRectangle.height > freePane.height)
-				return new L.LatLng(0, 0); // no scroll needed.
-
-			var spacingY = 100; // twips margin
+				return scroll; // no scroll needed.
 
 			// try to center in free pane the top of a cell
 			if (app.calc.cellCursorRectangle.y1 < freePane.y1)
-				scroll.y = app.calc.cellCursorRectangle.y1 - freePane.y1 - spacingY;
+				scroll.y = app.calc.cellCursorRectangle.y1 - freePane.y1;
 
 			// then check if end of a cell is visible
 			if (app.calc.cellCursorRectangle.y2 > freePane.y2 + scroll.y)
-				scroll.y = scroll.y + (app.calc.cellCursorRectangle.y2 - freePane.y2 + spacingY);
+				scroll.y = scroll.y + (app.calc.cellCursorRectangle.y2 - freePane.y2);
 		}
-
-		scroll = this._twipsToLatLng(scroll, this._map.getZoom()); // Simple point is also converted to L.Point by the converter.
 
 		return scroll;
 	},

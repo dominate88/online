@@ -232,7 +232,8 @@ class InitializerBase {
 			} // else jsdom
 		}
 
-		const element = document.getElementById("initial-variables");
+		const element = window.L.initial = document.getElementById("initial-variables");
+		window.L.initial._stubMessage = function () {};
 
 		window.host = "";
 		window.serviceRoot = "";
@@ -240,6 +241,7 @@ class InitializerBase {
 		window.versionPath = "";
 		window.accessToken = element.dataset.accessToken;
 		window.accessTokenTTL = element.dataset.accessTokenTtl;
+		window.noAuthHeader = element.dataset.noAuthHeader;
 		window.accessHeader = element.dataset.accessHeader;
 		window.postMessageOriginExt = "";
 		window.coolwsdVersion = "";
@@ -610,12 +612,30 @@ function getInitializerClass() {
 
 	global.setLogging(global.coolLogging != '');
 
+	function parseBool(val) {
+		if (typeof val !== 'string') return false;
+		switch (val.toLowerCase().trim()) {
+		case '1':
+		case 'true':
+		case 'yes':
+		case 'on':
+			return true;
+		case '0':
+		case 'false':
+		case 'no':
+		case 'off':
+			return false;
+		default:
+			return false;
+		}
+	}
+
 	global.L.Params = {
 		/// Shows close button if non-zero value provided
-		closeButtonEnabled: global.coolParams.get('closebutton'),
+		closeButtonEnabled: parseBool(global.coolParams.get('closebutton')),
 
 		/// Shows revision history file menu option
-		revHistoryEnabled: global.coolParams.get('revisionhistory'),
+		revHistoryEnabled: parseBool(global.coolParams.get('revisionhistory')),
 	};
 
 	global.prefs = {
@@ -1654,7 +1674,7 @@ function getInitializerClass() {
 	if (global.wopiSrc != '') {
 		global.docURL = decodeURIComponent(global.wopiSrc);
 		if (global.accessToken !== '') {
-			wopiParams = { 'access_token': global.accessToken, 'access_token_ttl': global.accessTokenTTL };
+			wopiParams = { 'access_token': global.accessToken, 'access_token_ttl': global.accessTokenTTL, 'no_auth_header': global.noAuthHeader };
 		}
 		else if (global.accessHeader !== '') {
 			wopiParams = { 'access_header': global.accessHeader };

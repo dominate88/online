@@ -16,9 +16,10 @@
 #include <config.h>
 
 #include <Poco/URI.h>
-#include <sysexits.h> // EX_OK
 
+#include <sysexits.h>
 #include <sys/wait.h>
+
 #include <sys/types.h>
 
 #include <common/Anonymizer.hpp>
@@ -55,7 +56,17 @@ void KitWebSocketHandler::handleMessage(const std::vector<char>& data)
                 tokens.startsWith(token, "name") || tokens.startsWith(token, "url"))
                 continue;
 
-            log << tokens.getParam(token) << ' ';
+            std::string tokenStr = tokens.getParam(token);
+
+            std::string::size_type pos = tokenStr.find("\"Author\":{\"type\":\"string\",\"value\":\"");
+            if (pos != std::string::npos) {
+                auto start = tokenStr.find("\"value\":\"", pos) + 9;
+                auto end = tokenStr.find("\"", start);
+                std::string value = tokenStr.substr(start, end - start);
+                tokenStr.replace(start, end - start, Anonymizer::anonymize(value));
+            }
+
+            log << tokenStr << ' ';
         }
     });
 
@@ -69,11 +80,11 @@ void KitWebSocketHandler::handleMessage(const std::vector<char>& data)
         const std::string& sessionId = tokens[1];
         _docKey = tokens[2];
         const std::string& docId = tokens[3];
-        const std::string fileId = Uri::getFilenameFromURL(_docKey);
+        const std::string url = Uri::decode(_docKey);
+        const std::string fileId = Uri::getFilenameFromURL(url);
         Anonymizer::mapAnonymized(fileId,
                                   fileId); // Identity mapping, since fileId is already obfuscated
 
-        const std::string url = Uri::decode(_docKey);
 #ifndef IOS
         Util::setThreadName("kit" SHARED_DOC_THREADNAME_SUFFIX + docId);
 #endif
@@ -89,7 +100,7 @@ void KitWebSocketHandler::handleMessage(const std::vector<char>& data)
             // We can do this only after creating the Document object.
             TraceEvent::emitOneRecordingIfEnabled(
                 std::string("{\"name\":\"process_name\",\"ph\":\"M\",\"args\":{\"name\":\"") +
-                "Kit-" + docId + "\"},\"pid\":" + std::to_string(getpid()) +
+                "Kit-" + docId + "\"},\"pid\":" + std::to_string(Util::getProcessId()) +
                 ",\"tid\":" + std::to_string(Util::getThreadId()) + "},\n");
         }
 
@@ -219,9 +230,9 @@ void BgSaveChildWebSocketHandler::onDisconnect()
 {
     LOG_TRC("Disconnected background web socket to parent kit");
     UnitKit::get().preBackgroundSaveExit();
-
+#if !MOBILEAPP
     Document::shutdownBackgroundWatchdog();
-
+#endif
     Util::forcedExit(EX_OK);
 }
 
@@ -332,13 +343,14 @@ void BgSaveParentWebSocketHandler::onDisconnect()
 {
     LOG_TRC("Disconnected background web socket to child " << _childPid);
 
+#if !MOBILEAPP
     // reap and de-zombify children.
     const auto [ret, sig] = SigUtil::reapZombieChild(_childPid, /*sighandler=*/false);
     if (sig)
         reportFailedSave(std::string("crashed with status ") + SigUtil::signalName(sig));
     else if (ret <= 0)
         LOG_WRN("Background save process disconnected but not terminated " << _childPid);
-
+#endif
     if (!_saveCompleted)
         reportFailedSave("terminated without saving");
 }

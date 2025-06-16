@@ -72,6 +72,9 @@
 /* Define to 1 if you have the <unistd.h> header file. */
 #define HAVE_UNISTD_H 1
 
+/* Define to 1 if you have the `memrchr' function. */
+#define HAVE_MEMRCHR 0
+
 /* Collabora Online WebSocket server version */
 #define COOLWSD_VERSION "@COOLWSD_VERSION@"
 
@@ -122,6 +125,15 @@
 #define CONFIG_STATIC
 #else
 #define CONFIG_STATIC static
+#endif
+
+/* Controls whether or not we allow loading documents from the local filesystem. */
+#ifndef ENABLE_LOCAL_FILESYSTEM
+#if MOBILEAPP || ENABLE_DEBUG
+#define ENABLE_LOCAL_FILESYSTEM 1
+#else
+#define ENABLE_LOCAL_FILESYSTEM 0
+#endif
 #endif
 
 /* Version number of package */

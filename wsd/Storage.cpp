@@ -31,6 +31,7 @@
 #endif
 
 #include <Poco/StreamCopier.h>
+#include <Poco/Path.h>
 #include <Poco/URI.h>
 
 #include <CommandControl.hpp>
@@ -45,6 +46,7 @@
 #include <common/FileUtil.hpp>
 #include <common/JsonUtil.hpp>
 #include <common/TraceEvent.hpp>
+#include <wsd/COOLWSD.hpp>
 
 #ifdef IOS
 #include <ios.h>
@@ -56,7 +58,9 @@
 #include "wasmapp.hpp"
 #endif // IOS
 
+#if ENABLE_LOCAL_FILESYSTEM
 bool StorageBase::FilesystemEnabled;
+#endif
 
 #if !MOBILEAPP
 
@@ -92,7 +96,10 @@ void StorageBase::initialize()
 {
 #if !MOBILEAPP
     const auto& app = Poco::Util::Application::instance();
+
+#if ENABLE_LOCAL_FILESYSTEM
     FilesystemEnabled = app.config().getBool("storage.filesystem[@allow]", false);
+#endif
 
     //parse wopi.storage.host only when there is no storage.wopi.alias_groups entry in config
     if (!app.config().has("storage.wopi.alias_groups"))
@@ -106,7 +113,10 @@ void StorageBase::initialize()
 
     HostUtil::parseAliases(app.config());
 
-#else // !MOBILEAPP
+    if (COOLWSD::IndirectionServerEnabled && COOLWSD::GeolocationSetup)
+        HostUtil::parseAllowedWSOrigins(app.config());
+
+#else // MOBILEAPP
     FilesystemEnabled = true;
 #endif // MOBILEAPP
 }
@@ -131,7 +141,8 @@ bool isLocalhost(const std::string& targetHost)
 
 #endif
 
-StorageBase::StorageType StorageBase::validate(const Poco::URI& uri, bool takeOwnership)
+StorageBase::StorageType StorageBase::validate(const Poco::URI& uri,
+                                               [[maybe_unused]] bool takeOwnership)
 {
     if (uri.isRelative() || uri.getScheme() == "file")
     {
@@ -145,12 +156,31 @@ StorageBase::StorageType StorageBase::validate(const Poco::URI& uri, bool takeOw
             return StorageBase::StorageType::Unauthorized;
         }
 #endif
-        if (FilesystemEnabled || takeOwnership)
+
+        if (takeOwnership)
+        {
+            LOG_DBG("Validated URI [" << COOLWSD::anonymizeUrl(uri.toString())
+                                      << "] as Conversion");
+            // Normalize the path.
+            Poco::Path path = Poco::Path(uri.getPath());
+            if (!path.isAbsolute() || !path.isFile() ||
+                !path.makeAbsolute().toString().starts_with(COOLWSD::ChildRoot))
+            {
+                LOG_ERR("Invalid path to document to convert [" << uri.toString() << ']');
+                return StorageBase::StorageType::Unsupported;
+            }
+
+            return StorageBase::StorageType::Conversion;
+        }
+
+#if ENABLE_LOCAL_FILESYSTEM
+        if (FilesystemEnabled)
         {
             LOG_DBG("Validated URI [" << COOLWSD::anonymizeUrl(uri.toString())
                                       << "] as FileSystem");
             return StorageBase::StorageType::FileSystem;
         }
+#endif // ENABLE_LOCAL_FILESYSTEM
 
         LOG_DBG("Local Storage is disabled by default. Enable in the config file or on the "
                 "command-line to enable.");
@@ -224,9 +254,17 @@ std::unique_ptr<StorageBase> StorageBase::create(const Poco::URI& uri, const std
                 "No acceptable WOPI hosts found matching the target host [" + uri.getHost() +
                 "] in config");
             break;
+
+        case StorageBase::StorageType::Conversion:
+            return std::make_unique<LocalStorage>(uri, jailRoot, jailPath, /*takeOwnership=*/true);
+            break;
+
+#if ENABLE_LOCAL_FILESYSTEM
         case StorageBase::StorageType::FileSystem:
             return std::make_unique<LocalStorage>(uri, jailRoot, jailPath, takeOwnership);
             break;
+#endif // ENABLE_LOCAL_FILESYSTEM
+
 #if !MOBILEAPP
         case StorageBase::StorageType::Wopi:
             return std::make_unique<WopiStorage>(uri, jailRoot, jailPath);
@@ -382,7 +420,7 @@ std::size_t LocalStorage::uploadLocalFileToStorageAsync(
         if (_isCopy && Poco::File(getRootFilePathUploading()).exists())
             FileUtil::copyFileTo(getRootFilePathUploading(), path);
 
-        const FileUtil::Stat stat(std::move(path));
+        const FileUtil::Stat stat(path); // Don't move 'path' as it's used in the catch.
         size = stat.size();
 
         // update its fileinfo object. This is used later to check if someone else changed the

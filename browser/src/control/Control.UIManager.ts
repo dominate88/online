@@ -85,7 +85,19 @@ class UIManager extends L.Control {
 				target.parentElement?.id === 'document-titlebar') { // checks if clicked on the document titlebar container
 				this.map.fire('editorgotfocus');}
 		});
+		const mainNav = document.querySelector('.main-nav') as HTMLElement;
+		mainNav.addEventListener('wheel', function(e: WheelEvent) {
+			const el = this as HTMLElement;
 
+			// Allow default scroll for Shift + scroll or if not horizontally scrollable
+			if (e.shiftKey || el.scrollWidth <= el.clientWidth) return;
+	  
+			// Scroll horizontally
+			this.scrollLeft += e.deltaY;
+	  
+			// Prevent vertical scroll only within this element
+			e.preventDefault();
+		  }, { passive: false });
 		this.map.on('updateviewslist', this.onUpdateViews, this);
 
 		this.map['stateChangeHandler'].setItemValue('toggledarktheme', 'false');
@@ -450,7 +462,7 @@ class UIManager extends L.Control {
 			document.body.setAttribute('data-integratorSidebar', 'true');
 
 		if (window.mode.isMobile()) {
-			$('#mobile-edit-button').show();
+			$('#mobile-edit-button').css('display', 'flex');
 			this.map.mobileBottomBar = JSDialog.MobileBottomBar(this.map);
 			this.map.mobileTopBar = JSDialog.MobileTopBar(this.map);
 			this.map.mobileSearchBar = JSDialog.MobileSearchBar(this.map);
@@ -560,11 +572,7 @@ class UIManager extends L.Control {
 					app.socket.sendMessage('uno .uno:SidebarShow');
 					app.socket.sendMessage('uno .uno:MasterSlidesPanel');
 					this.map.sidebar.setupTargetDeck('.uno:MasterSlidesPanel');
-				} else if (this.getBooleanDocTypePref('NavigatorDeck', false)) {
-					app.socket.sendMessage('uno .uno:SidebarShow');
 				}
-			} else if (this.getBooleanDocTypePref('NavigatorDeck', false)) {
-				app.socket.sendMessage('uno .uno:SidebarShow');
 			} else if (this.getBooleanDocTypePref('StyleListDeck', false)) {
 				app.socket.sendMessage('uno .uno:SidebarShow');
 				app.socket.sendMessage('uno .uno:SidebarDeck.StyleListDeck');
@@ -1190,8 +1198,6 @@ class UIManager extends L.Control {
 		$('#toolbar-wrapper').css('display', 'none');
 
 		$('#document-container').addClass('tabs-collapsed');
-
-		this.map._docLayer._syncTileContainerSize();
 	}
 
 	/**
@@ -1207,8 +1213,6 @@ class UIManager extends L.Control {
 		$('#toolbar-wrapper').css('display', '');
 
 		$('#document-container').removeClass('tabs-collapsed');
-
-		this.map._docLayer._syncTileContainerSize();
 	}
 
 	showNotebookTab(id: string, show: boolean): void {
@@ -1330,9 +1334,6 @@ class UIManager extends L.Control {
 				app.socket.sendMessage('uno .uno:SidebarHide');
 			}
 		}
-
-		// We've resized the document container.
-		this.map.invalidateSize();
 	}
 
 	/**
@@ -1606,7 +1607,7 @@ class UIManager extends L.Control {
 	/**
 	 * Constructs JSON for a modal dialog.
 	 * @param id - Base ID.
-	 * @param title - Dialog title.
+	 * @param title - Dialog title. No titlebar if missing.
 	 * @param cancellable - Whether the dialog is cancellable.
 	 * @param widgets - Array of widget configurations.
 	 * @param focusId - Optional focus element ID.
@@ -1614,7 +1615,7 @@ class UIManager extends L.Control {
 	 */
 	private _modalDialogJSON(
 		id: string,
-		title: string,
+		title: string | undefined,
 		cancellable: boolean,
 		widgets: any[],
 		focusId?: string,
@@ -1627,7 +1628,7 @@ class UIManager extends L.Control {
 			dialogid: id,
 			type: 'modalpopup',
 			title: title,
-			hasClose: true,
+			hasClose: title !== undefined,
 			hasOverlay: true,
 			cancellable: cancellable,
 			jsontype: 'dialog',
@@ -1656,7 +1657,7 @@ class UIManager extends L.Control {
 	/// withCancel - specifies if needs cancel button also
 	showInfoModal(
 		id: string,
-		title: string,
+		title: string | undefined,
 		message1: string,
 		message2: string,
 		buttonText: string,

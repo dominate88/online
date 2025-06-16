@@ -61,7 +61,8 @@ private:
     /// Does this address feature in the allowed hosts list.
     static bool allowPostFrom(const std::string& address);
 
-    static bool allowConvertTo(const std::string& address, const Poco::Net::HTTPRequest& request, AsyncFn asyncCb);
+    static bool allowConvertTo(const std::string& address, const Poco::Net::HTTPRequest& request,
+                               bool capabilityQuery, AsyncFn asyncCb);
 
     /// @return true if request has been handled synchronously and response sent, otherwise false
     bool handleRootRequest(const RequestDetails& requestDetails,
@@ -80,12 +81,12 @@ private:
                                    const std::shared_ptr<StreamSocket>& socket);
 
     bool handleWopiAccessCheckRequest(const Poco::Net::HTTPRequest& request,
-                                   Poco::MemoryInputStream& message,
-                                   const std::shared_ptr<StreamSocket>& socket);
+                                      const std::string& text,
+                                      const std::shared_ptr<StreamSocket>& socket);
 
     /// @return true if request has been handled synchronously and response sent, otherwise false
     static bool handleClipboardRequest(const Poco::Net::HTTPRequest& request,
-                                       Poco::MemoryInputStream& message,
+                                       std::istream& message,
                                        SocketDisposition& disposition,
                                        const std::shared_ptr<StreamSocket>& socket);
 
@@ -108,13 +109,13 @@ private:
 
     /// @return true if request has been handled synchronously and response sent, otherwise false
     bool handlePostRequest(const RequestDetails& requestDetails,
-                           const Poco::Net::HTTPRequest& request, Poco::MemoryInputStream& message,
+                           const Poco::Net::HTTPRequest& request, std::istream& message,
                            SocketDisposition& disposition,
                            const std::shared_ptr<StreamSocket>& socket);
 
     bool handleClientProxyRequest(const Poco::Net::HTTPRequest& request,
                                   const RequestDetails& requestDetails,
-                                  Poco::MemoryInputStream& message, SocketDisposition& disposition);
+                                  std::istream& message, SocketDisposition& disposition);
 
     void sendResult(const std::shared_ptr<StreamSocket>& socket, CheckStatus result);
 
@@ -176,6 +177,9 @@ private:
 
     /// Cache for static files, to avoid reading and processing from disk.
     static std::map<std::string, std::string> StaticFileContentCache;
+
+    /// The next unique connection-ID.
+    static std::atomic<uint64_t> NextConnectionId;
 };
 
 /* vim:set shiftwidth=4 softtabstop=4 expandtab: */

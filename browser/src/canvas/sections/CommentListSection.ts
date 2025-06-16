@@ -1252,10 +1252,9 @@ export class CommentSection extends CanvasSectionObject {
 
 	public onResize (): void {
 		this.checkCollapseState();
-		this.update();
 		// When window is resized, it may mean that comment wizard is closed. So we hide the highlights.
 		this.removeHighlighters();
-		this.containerObject.requestReDraw();
+		this.update();
 	}
 
 	public onNewDocumentTopLeft (): void {
@@ -1574,9 +1573,11 @@ export class CommentSection extends CanvasSectionObject {
 						annotation.sectionProperties.autoSave.innerText = _('Autosaved');
 						if (app.map._docLayer._docType === 'spreadsheet')
 							annotation.show();
-						annotation.edit();
 						if (autoSavedComment.sectionProperties.data.id === 'new')
 							this.removeItem(autoSavedComment.sectionProperties.data.id);
+						annotation.edit();
+						if(this.shouldCollapse())
+							annotation.setCollapsed();
 						CommentSection.autoSavedComment = null;
 						CommentSection.commentWasAutoAdded = true;
 					}

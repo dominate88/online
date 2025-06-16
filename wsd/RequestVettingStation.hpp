@@ -53,10 +53,9 @@ public:
 
     inline void logPrefix(std::ostream& os) const
     {
-        if (_socket)
-        {
-            os << '#' << _socket->getFD() << ": ";
-        }
+        auto socket = _socket.lock();
+        int logContextFD = socket ? socket->getFD() : -1;
+        os << '#' << logContextFD << ": ";
     }
 
     /// Called when cool.html is served, to start the vetting as early as possible.
@@ -67,6 +66,14 @@ public:
                        const std::shared_ptr<WebSocketHandler>& ws,
                        const std::shared_ptr<StreamSocket>& socket, unsigned mobileAppDocId,
                        SocketDisposition& disposition);
+
+#if !MOBILEAPP
+    /// Attempt to create a DocBroker and setup a transfer via disposition
+    /// of disposition's Socket to the DocBrokers SocketPoll
+    void transferToDocBroker(const std::string& url,
+                             const std::string& configId,
+                             const std::string& sslVerifyResult);
+#endif
 
     /// Returns true iff we are older than the given age.
     template <typename T>
@@ -84,7 +91,7 @@ private:
 
     void createClientSession(const std::shared_ptr<DocumentBroker>& docBroker,
                              const std::string& docKey, const std::string& url,
-                             const Poco::URI& uriPublic, bool isReadOnly);
+                             const Poco::URI& uriPublic);
 
     /// Send unauthorized error to the client and disconnect the socket.
     /// Includes SSL verification status, if available, as the error code.
@@ -97,7 +104,7 @@ private:
 #if !MOBILEAPP
     void launchInstallPresets();
 
-    void checkFileInfo(const Poco::URI& uri, bool isReadOnly, int redirectionLimit);
+    void checkFileInfo(const Poco::URI& uri, int redirectionLimit);
     std::shared_ptr<CheckFileInfo> _checkFileInfo;
     std::shared_ptr<PresetsInstallTask> _asyncInstallTask;
 #endif // !MOBILEAPP
@@ -106,7 +113,7 @@ private:
     std::string _id;
     std::shared_ptr<TerminatingPoll> _poll;
     std::shared_ptr<WebSocketHandler> _ws;
-    std::shared_ptr<StreamSocket> _socket;
+    std::weak_ptr<StreamSocket> _socket;
     Util::Stopwatch _birthday;
     unsigned _mobileAppDocId;
 };

@@ -20,8 +20,9 @@
 #include <common/TraceEvent.hpp>
 #include <common/Unit.hpp>
 #include <common/Util.hpp>
-#include <common/Util.hpp>
+#if !MOBILEAPP
 #include <common/Watchdog.hpp>
+#endif
 #include <net/HttpRequest.hpp>
 #include <net/NetUtil.hpp>
 #include <net/ServerSocket.hpp>
@@ -35,6 +36,7 @@
 
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <cctype>
 #include <iomanip>
@@ -44,21 +46,28 @@
 #include <sstream>
 #include <cstdio>
 #include <string>
-#include <unistd.h>
-#include <sysexits.h>
+
 #include <sys/stat.h>
 #include <sys/types.h>
+
+#include <sysexits.h>
+#include <unistd.h>
 #include <sys/un.h>
+
 #ifdef __FreeBSD__
 #include <sys/ucred.h>
 #endif
 
 #include <Poco/MemoryStream.h>
+#if !MOBILEAPP
 #include <Poco/Net/HTTPRequest.h>
 #include <Poco/Net/HTTPResponse.h>
 #include <Poco/Net/NetException.h>
 #include <Poco/Net/WebSocket.h> // computeAccept
+#endif
+
 #include <Poco/URI.h>
+
 #if ENABLE_SSL
 #include <Poco/Net/X509Certificate.h>
 #endif
@@ -72,14 +81,18 @@ namespace ThreadChecks
     std::atomic<bool> Inhibit(false);
 }
 
+#if !MOBILEAPP
+
 std::unique_ptr<Watchdog> SocketPoll::PollWatchdog;
+
+#define SOCKET_ABSTRACT_UNIX_NAME "0coolwsd-"
+
+#endif
 
 std::atomic<size_t> StreamSocket::ExternalConnectionCount = 0;
 
 net::DefaultValues net::Defaults = { .inactivityTimeout = std::chrono::seconds(3600),
                                      .maxExtConnections = 200000 /* arbitrary value to be resolved */ };
-
-#define SOCKET_ABSTRACT_UNIX_NAME "0coolwsd-"
 
 constexpr std::string_view Socket::toString(Type t)
 {
@@ -301,7 +314,9 @@ SocketPoll::SocketPoll(std::string threadName)
     , _pollStartIndex(0)
     , _owner(std::this_thread::get_id())
     , _threadStarted(0)
+#if !MOBILEAPP
     , _watchdogTime(Watchdog::getDisableStamp())
+#endif
     , _ownerThreadId(Util::getThreadId())
     , _stop(false)
     , _threadFinished(false)
@@ -309,9 +324,11 @@ SocketPoll::SocketPoll(std::string threadName)
 {
     ProfileZone profileZone("SocketPoll::SocketPoll");
 
+#if !MOBILEAPP
     static bool watchDogProfile = !!getenv("COOL_WATCHDOG");
     if (watchDogProfile && !PollWatchdog)
         PollWatchdog = std::make_unique<Watchdog>();
+#endif
 
     _wakeup[0] = -1;
     _wakeup[1] = -1;
@@ -320,16 +337,20 @@ SocketPoll::SocketPoll(std::string threadName)
 
     LOG_DBG("New " << logInfo());
 
+#if !MOBILEAPP
     if (PollWatchdog)
         PollWatchdog->addTime(&_watchdogTime, &_ownerThreadId);
+#endif
 }
 
 SocketPoll::~SocketPoll()
 {
     LOG_DBG("~" << logInfo());
 
+#if !MOBILEAPP
     if (PollWatchdog)
         PollWatchdog->removeTime(&_watchdogTime);
+#endif
 
     joinThread();
 
@@ -471,12 +492,16 @@ void SocketPoll::pollingThreadEntry()
 
 void SocketPoll::disableWatchdog()
 {
+#if !MOBILEAPP
     _watchdogTime = Watchdog::getDisableStamp();
+#endif
 }
 
 void SocketPoll::enableWatchdog()
 {
+#if !MOBILEAPP
     _watchdogTime = Watchdog::getTimestamp();
+#endif
 }
 
 int SocketPoll::poll(int64_t timeoutMaxMicroS, bool justPoll)
@@ -511,16 +536,16 @@ int SocketPoll::poll(int64_t timeoutMaxMicroS, bool justPoll)
         struct timespec timeout;
         timeout.tv_sec = timeoutMaxMicroS / (1000 * 1000);
         timeout.tv_nsec = (timeoutMaxMicroS % (1000 * 1000)) * 1000;
-        rc = ::ppoll(&_pollFds[0], size + 1, &timeout, nullptr);
+        rc = ::ppoll(_pollFds.data(), size + 1, &timeout, nullptr);
 #  else
         int timeoutMaxMs = (timeoutMaxMicroS + 999) / 1000;
         LOG_TRC("Legacy Poll start, timeoutMs: " << timeoutMaxMs);
-        rc = ::poll(&_pollFds[0], size + 1, std::max(timeoutMaxMs,0));
+        rc = ::poll(_pollFds.data(), size + 1, std::max(timeoutMaxMs,0));
 #  endif
 #else
         LOG_TRC("SocketPoll Poll");
         int timeoutMaxMs = (timeoutMaxMicroS + 999) / 1000;
-        rc = fakeSocketPoll(&_pollFds[0], size + 1, std::max(timeoutMaxMs,0));
+        rc = fakeSocketPoll(_pollFds.data(), size + 1, std::max(timeoutMaxMs,0));
 #endif
     }
     while (rc < 0 && errno == EINTR);
@@ -556,20 +581,21 @@ int SocketPoll::poll(int64_t timeoutMaxMicroS, bool justPoll)
     // First process the wakeup pipe (always the last entry).
     if (_pollFds[size].revents)
     {
-        LOGA_TRC(Socket, '#' << _pollFds[size].fd << ": Handling events of wakeup pipe: 0x" << std::hex
-                 << _pollFds[size].revents << std::dec);
+        LOGA_TRC(Socket, "Handling events of wakeup pipe (" << _pollFds[size].fd << "): 0x"
+                                                            << std::hex << _pollFds[size].revents
+                                                            << std::dec);
 
         // Clear the data.
-#if !MOBILEAPP
         int dump[32];
+#if !MOBILEAPP
         dump[0] = ::read(_wakeup[0], &dump, sizeof(dump));
-        LOGA_TRC(Socket, "Wakeup pipe read " << dump[0] << " bytes");
 #else
-        LOGA_TRC(Socket, "Wakeup pipe read");
-        int dump = fakeSocketRead(_wakeup[0], &dump, sizeof(dump));
+        dump[0] = fakeSocketRead(_wakeup[0], &dump, sizeof(dump));
 #endif
+        LOGA_TRC(Socket, "Wakeup pipe (" << _wakeup[0] << ") read " << dump[0] << " bytes");
 
         std::vector<CallbackFn> invoke;
+        std::vector<SocketTransfer> pendingTransfers;
         {
             std::lock_guard<std::mutex> lock(_mutex);
 
@@ -590,6 +616,7 @@ int SocketPoll::poll(int64_t timeoutMaxMicroS, bool justPoll)
 
             // Extract list of callbacks to process
             std::swap(_newCallbacks, invoke);
+            std::swap(_pendingTransfers, pendingTransfers);
         }
 
         if (invoke.size() > 0)
@@ -606,6 +633,24 @@ int SocketPoll::poll(int64_t timeoutMaxMicroS, bool justPoll)
                         "] callback: " << exc.what());
             }
         }
+
+        if (pendingTransfers.size() > 0)
+            LOGA_TRC(Socket, "Invoking " << pendingTransfers.size() << " transfers");
+        for (const auto& pendingTransfer : pendingTransfers)
+        {
+            try
+            {
+                transfer(pendingTransfer);
+            }
+            catch (const std::exception& exc)
+            {
+                LOG_ERR("Exception while invoking poll [" << _name <<
+                        "] transfer: " << exc.what());
+            }
+        }
+
+        pendingTransfers.clear();
+        invoke.clear();
 
         try
         {
@@ -671,7 +716,7 @@ int SocketPoll::poll(int64_t timeoutMaxMicroS, bool justPoll)
                     rc = -1;
                 }
 
-                if (_pollSockets[i]->isShutdown() || !disposition.isContinue())
+                if (!_pollSockets[i]->isOpen() || !disposition.isContinue())
                 {
                     ++itemsErased;
                     LOGA_TRC(Socket, '#' << _pollFds[i].fd << ": Removing socket (at " << i
@@ -712,6 +757,36 @@ int SocketPoll::poll(int64_t timeoutMaxMicroS, bool justPoll)
     return rc;
 }
 
+void SocketPoll::transfer(const SocketTransfer& pendingTransfer)
+{
+    std::shared_ptr<Socket> socket = pendingTransfer._socket.lock();
+    std::shared_ptr<SocketPoll> toPoll = pendingTransfer._toPoll.lock();
+    if (!socket)
+    {
+        LOG_WRN("Socket for transfer no longer exists");
+        return;
+    }
+    if (!toPoll)
+    {
+        LOG_WRN("Destination Poll for socket transfer no longer exists");
+        return;
+    }
+    auto it = std::find(_pollSockets.begin(), _pollSockets.end(), socket);
+    if (it == _pollSockets.end())
+        LOG_WRN("Trying to move socket out of the wrong poll");
+    else
+    {
+        SocketDisposition disposition(socket);
+        disposition.setTransfer(*toPoll, pendingTransfer._cbAfterArrivalInNewPoll);
+        // leave empty entry in _pollSockets to be added to toErase and
+        // cleaned later.
+        *it = nullptr;
+        disposition.execute();
+        if (pendingTransfer._cbAfterRemovalFromOldPoll)
+            pendingTransfer._cbAfterRemovalFromOldPoll();
+    }
+}
+
 void SocketPoll::wakeupWorld()
 {
     std::lock_guard<std::mutex> lock(getPollWakeupsMutex());
@@ -730,8 +805,9 @@ void SocketPoll::closeAllSockets()
     removeFromWakeupArray();
     for (std::shared_ptr<Socket> &it : _pollSockets)
     {
-        // first close the underlying socket
+        // first close the underlying socket/fakeSocket
         it->closeFD(*this);
+        assert(!it->isOpen() && "Socket is still open after closing");
 
         // avoid the socketHandler' getting an onDisconnect
         auto stream = dynamic_cast<StreamSocket *>(it.get());
@@ -743,38 +819,24 @@ void SocketPoll::closeAllSockets()
     assert(_newSockets.size() == 0);
 }
 
-void SocketPoll::takeSocket(const std::shared_ptr<SocketPoll> &fromPoll,
-                            const std::shared_ptr<Socket> &inSocket)
+void SocketPoll::takeSocket(const std::shared_ptr<SocketPoll>& fromPoll,
+                            const std::shared_ptr<SocketPoll>& toPoll,
+                            const std::shared_ptr<Socket>& inSocket)
 {
     std::mutex mut;
     std::condition_variable cond;
     bool transferred = false;
 
     // Important we're not blocking the fromPoll thread.
-    ASSERT_CORRECT_THREAD();
+    toPoll->assertCorrectThread(__FILE__, __LINE__);
 
-    // hold a reference during transfer
-    std::shared_ptr<Socket> socket = inSocket;
+    int socketFD = inSocket->getFD();
 
-    SocketPoll *toPoll = this;
-    fromPoll->addCallback([fromPoll,socket,&mut,&cond,&transferred,toPoll](){
-        auto it = std::find(fromPoll->_pollSockets.begin(),
-                            fromPoll->_pollSockets.end(), socket);
-        if (it != fromPoll->_pollSockets.end())
-        {
-            // Erasing messes up the tracking of poll results in 'poll'
-            // leave to be added to toErase and cleaned later.
-            *it = nullptr;
-        }
-        else
-            LOG_WRN("Trying to move socket out of the wrong poll");
+    fromPoll->transferSocketTo(inSocket, toPoll,
+        [](const std::shared_ptr<Socket>& /*moveSocket*/){},
+        [&mut,&cond,&transferred,socketFD](){
 
-        // sockets in transit are un-owned
-        SocketThreadOwnerChange::resetThreadOwner(*socket);
-
-        toPoll->insertNewSocket(socket);
-
-        LOG_TRC("Socket #" << socket->getFD() << " moved across polls");
+        LOG_TRC("Socket #" << socketFD << " moved across polls");
 
         // Let the caller know we've done our job.
         std::unique_lock<std::mutex> lock(mut);
@@ -782,14 +844,14 @@ void SocketPoll::takeSocket(const std::shared_ptr<SocketPoll> &fromPoll,
         cond.notify_all();
     });
 
-    LOG_TRC("Waiting to transfer Socket #" << socket->getFD() <<
-            " from: " << fromPoll->name() << " to new poll: " << name());
+    LOG_TRC("Waiting to transfer Socket #" << socketFD <<
+            " from: " << fromPoll->name() << " to new poll: " << toPoll->name());
     std::unique_lock<std::mutex> lock(mut);
-    while (!transferred && continuePolling()) // in case of exit during transfer.
+    while (!transferred && toPoll->continuePolling()) // in case of exit during transfer.
         cond.wait_for(lock, std::chrono::milliseconds(50));
 
-    LOG_TRC("Transfer of Socket #" << socket->getFD() <<
-            " from: " << fromPoll->name() << " to new poll: " << name() << " complete");
+    LOG_TRC("Transfer of Socket #" << socketFD <<
+            " from: " << fromPoll->name() << " to new poll: " << toPoll->name() << " complete");
 }
 
 void SocketPoll::createWakeups()
@@ -807,6 +869,9 @@ void SocketPoll::createWakeups()
     {
         throw std::runtime_error("Failed to allocate pipe for SocketPoll [" + _name + "] waking.");
     }
+
+    LOG_DBG("Created wakeup FDs for SocketPoll [" << _name << "], rfd: " << _wakeup[0]
+                                                  << ", wfd: " << _wakeup[1]);
 
     std::lock_guard<std::mutex> lock(getPollWakeupsMutex());
     getWakeupsArray().push_back(_wakeup[1]);
@@ -1000,23 +1065,25 @@ void SocketDisposition::execute()
         // Drop pretentions of ownership before _socketMove.
         SocketThreadOwnerChange::resetThreadOwner(*_socket);
 
-        if (!_toPoll) {
-            assert (isMove());
-            _socketMove(_socket);
-        } else {
-            assert (isTransfer());
-            if (!_toPoll->isRunOnClientThread())
-            {
-                // Ensure the thread is running before adding callback.
-                _toPoll->startThread();
-            }
-            _toPoll->addCallback([pollCopy = _toPoll, socket = _socket, socketMoveFn = std::move(_socketMove)]()
-                {
-                    pollCopy->insertNewSocket(socket);
-                    socketMoveFn(socket);
-                });
+        assert (isTransfer() && _toPoll);
+        if (!_toPoll->isRunOnClientThread())
+        {
+            // Ensure the thread is running before adding callback.
+            _toPoll->startThread();
         }
+
+        auto callback = [pollCopy = _toPoll, socket = std::move(_socket),
+                         socketMoveFn = std::move(_socketMove)]() mutable
+        {
+            pollCopy->insertNewSocket(socket);
+            socketMoveFn(socket);
+            // Clear lambda's socket capture while in the polling thread
+            socket.reset();
+        };
         _socketMove = nullptr;
+        assert(!_socket && "should be unset after move");
+
+        _toPoll->addCallback(std::move(callback));
         _toPoll = nullptr;
     }
 }
@@ -1059,11 +1126,11 @@ bool StreamSocket::send(const http::Response& response)
 {
     if (response.writeData(_outBuffer))
     {
-        flush();
+        attemptWrites();
         return true;
     }
 
-    shutdown();
+    asyncShutdown();
     return false;
 }
 
@@ -1071,11 +1138,11 @@ bool StreamSocket::send(http::Request& request)
 {
     if (request.writeData(_outBuffer, getSendBufferCapacity()))
     {
-        flush();
+        attemptWrites();
         return true;
     }
 
-    shutdown();
+    asyncShutdown();
     return false;
 }
 
@@ -1084,7 +1151,7 @@ bool StreamSocket::sendAndShutdown(http::Response& response)
     response.header().setConnectionToken(http::Header::ConnectionToken::Close);
     if (send(response))
     {
-        shutdown();
+        asyncShutdown();
         return true;
     }
 
@@ -1097,22 +1164,24 @@ void SocketPoll::dumpState(std::ostream& os) const
     // FIXME: NOT thread-safe! _pollSockets is modified from the polling thread!
     const std::vector<std::shared_ptr<Socket>> pollSockets = _pollSockets;
 
-    os << "\n  SocketPoll [" << name() << "] with " << pollSockets.size() << " socket"
-       << (pollSockets.size() == 1 ? "" : "s") << " - wakeup rfd: " << _wakeup[0]
+    os << "\n  SocketPoll [" << name() << "] with " << pollSockets.size() << " socket(s)" << " and "
+       << _newCallbacks.size() << " callback(s) - wakeup rfd: " << _wakeup[0]
        << " wfd: " << _wakeup[1] << '\n';
 
-    os << "\tcallbacks: " << _newCallbacks.size() << '\n';
-
-    os << "\t\tfd\tevents\tstatus\trbuffered\trcapacity\twbuffered\twcapacity\trtotal\twtotal\tclie"
-          "ntaddress\n";
-    std::size_t totalCapacity = 0;
-    for (const std::shared_ptr<Socket>& socket : pollSockets)
+    if (!pollSockets.empty())
     {
-        socket->dumpState(os);
-        totalCapacity += socket->totalBufferCapacity();
+        os << "\t\tfd\tevents\tstatus\trbuffered\trcapacity\twbuffered\twcapacity\trtotal\twtotal\t"
+              "clientaddress\n";
+        std::size_t totalCapacity = 0;
+        for (const std::shared_ptr<Socket>& socket : pollSockets)
+        {
+            socket->dumpState(os);
+            totalCapacity += socket->totalBufferCapacity();
+        }
+
+        os << "\n  Total socket buffer capacity: " << totalCapacity / 1024 << " KB\n";
     }
 
-    os << "\n  Total socket buffer capacity: " << totalCapacity / 1024 << " KB\n";
     os << "\n  Done SocketPoll [" << name() << "]\n";
     THREAD_UNSAFE_DUMP_END
 }
@@ -1127,7 +1196,7 @@ bool ServerSocket::bind([[maybe_unused]] Type type, [[maybe_unused]] int port)
     const int reuseAddress = 1;
     constexpr unsigned int len = sizeof(reuseAddress);
     if (::setsockopt(getFD(), SOL_SOCKET, SO_REUSEADDR, &reuseAddress, len) == -1)
-        LOG_SYS("Failed setsockopt SO_REUSEADDR: " << strerror(errno));
+        LOG_SYS("Failed setsockopt SO_REUSEADDR on socket fd " << getFD() << ": " << strerror(errno));
 
     int rc;
 
@@ -1176,6 +1245,8 @@ bool ServerSocket::bind([[maybe_unused]] Type type, [[maybe_unused]] int port)
 #endif
 }
 
+#if !MOBILEAPP
+
 bool ServerSocket::isUnrecoverableAcceptError(const int cause)
 {
     constexpr const char * messagePrefix = "Failed to accept. (errno: ";
@@ -1213,6 +1284,8 @@ bool ServerSocket::isUnrecoverableAcceptError(const int cause)
     }
 }
 
+#endif
+
 std::shared_ptr<Socket> ServerSocket::accept()
 {
     // Accept a connection (if any) and set it to non-blocking.
@@ -1227,15 +1300,15 @@ std::shared_ptr<Socket> ServerSocket::accept()
     struct sockaddr_in6 clientInfo;
     socklen_t addrlen = sizeof(clientInfo);
     const int rc = ::accept4(getFD(), (struct sockaddr *)&clientInfo, &addrlen, SOCK_NONBLOCK | SOCK_CLOEXEC);
-#else
-    const int rc = fakeSocketAccept4(getFD());
-#endif
     if (rc < 0)
     {
         if (isUnrecoverableAcceptError(errno))
             Util::forcedExit(EX_SOFTWARE);
         return nullptr;
     }
+#else
+    const int rc = fakeSocketAccept4(getFD());
+#endif
     LOG_TRC("Accepted socket #" << rc << ", creating socket object.");
 
 #if !MOBILEAPP
@@ -1514,24 +1587,15 @@ bool StreamSocket::checkRemoval(std::chrono::steady_clock::time_point now)
         LOG_WRN("CheckRemoval: Timeout: {Inactive " << isInactive << ", Termination "
                                                     << isTermination << "}, " << getStatsString(now)
                                                     << ", " << *this);
-        if (_socketHandler)
+        ensureDisconnected();
+        if (!isShutdown())
         {
-            _socketHandler->onDisconnect();
-            if (!isShutdown())
-            {
-                // Note: Ensure proper semantics of onDisconnect()
-                LOG_WRN("Socket still open post onDisconnect(), forced shutdown.");
-                shutdown(); // signal
-                shutdownConnection(); // real -> setShutdown()
-            }
-        }
-        else
-        {
-            shutdown(); // signal
+            asyncShutdown(); // signal
             shutdownConnection(); // real -> setShutdown()
         }
 
         assert(isShutdown() && "Should have issued shutdown");
+        assert(!isOpen() && "Socket is still open after closing");
         return true;
     }
 
@@ -1540,9 +1604,9 @@ bool StreamSocket::checkRemoval(std::chrono::steady_clock::time_point now)
 
 #if !MOBILEAPP
 
-bool StreamSocket::parseHeader(const char* clientName, Poco::MemoryInputStream& message,
+bool StreamSocket::parseHeader(const std::string_view clientName, std::istream& message,
                                Poco::Net::HTTPRequest& request,
-                               std::chrono::steady_clock::time_point lastHTTPHeader,
+                               std::chrono::steady_clock::time_point& lastHTTPHeader,
                                MessageMap& map)
 {
     assert(map._headerSize == 0 && map._messageSize == 0);
@@ -1665,7 +1729,7 @@ bool StreamSocket::parseHeader(const char* clientName, Poco::MemoryInputStream& 
                     LOG_ERR("parseHeader: Missing \\r\\n at end of chunk " << chunk << " of length " << chunkLen << ", delay " << delayMs.count() << "ms");
                     LOG_CHUNK("Chunk " << chunk << " is: \n"
                                        << HexUtil::dumpHex("", "", chunkStart, itBody + 1, false));
-                    shutdown();
+                    asyncShutdown();
                     return false; // TODO: throw something sensible in this case
                 }
 
@@ -1685,7 +1749,7 @@ bool StreamSocket::parseHeader(const char* clientName, Poco::MemoryInputStream& 
         LOG_DBG("parseHeader: Exception caught with "
                 << _inBuffer.size() << " bytes, shutdown: " << exc.displayText() << ", delay "
                 << delayMs.count() << "ms");
-        shutdown();
+        asyncShutdown();
         return false;
     }
     catch (const Poco::Net::UnsupportedRedirectException& exc)
@@ -1693,7 +1757,7 @@ bool StreamSocket::parseHeader(const char* clientName, Poco::MemoryInputStream& 
         LOG_DBG("parseHeader: Exception caught with "
                 << _inBuffer.size() << " bytes, shutdown: " << exc.displayText() << ", delay "
                 << delayMs.count() << "ms");
-        shutdown();
+        asyncShutdown();
         return false;
     }
     catch (const Poco::Net::HTTPException& exc)
@@ -1701,7 +1765,7 @@ bool StreamSocket::parseHeader(const char* clientName, Poco::MemoryInputStream& 
         LOG_DBG("parseHeader: Exception caught with "
                 << _inBuffer.size() << " bytes, shutdown: " << exc.displayText() << ", delay "
                 << delayMs.count() << "ms");
-        shutdown();
+        asyncShutdown();
         return false;
     }
     catch (const Poco::Exception& exc)
@@ -1711,7 +1775,7 @@ bool StreamSocket::parseHeader(const char* clientName, Poco::MemoryInputStream& 
             LOG_DBG("parseHeader: Exception caught with "
                     << _inBuffer.size() << " bytes, shutdown: " << exc.displayText() << ", delay "
                     << delayMs.count() << "ms");
-            shutdown();
+            asyncShutdown();
         }
         else
         {
@@ -1728,7 +1792,7 @@ bool StreamSocket::parseHeader(const char* clientName, Poco::MemoryInputStream& 
             LOG_DBG("parseHeader: Exception caught with "
                     << _inBuffer.size() << " bytes, shutdown: " << exc.what() << ", delay "
                     << delayMs.count() << "ms");
-            shutdown();
+            asyncShutdown();
         }
         else
         {
@@ -1793,8 +1857,6 @@ bool StreamSocket::sniffSSL() const
             _inBuffer[5] == 0x01);  // Handshake: CLIENT_HELLO
 }
 
-#endif // !MOBILEAPP
-
 namespace {
     /// To make the protected 'computeAccept' accessible.
     class PublicComputeAccept final : public Poco::Net::WebSocket
@@ -1822,6 +1884,8 @@ std::string WebSocketHandler::generateKey()
 {
     return PublicComputeAccept::generateKey();
 }
+
+#endif // !MOBILEAPP
 
 // Required by Android and iOS apps.
 namespace http

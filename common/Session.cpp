@@ -171,7 +171,7 @@ void Session::parseDocOptions(const StringVector& tokens, int& part, std::string
         }
         else if (name == "timezone")
         {
-            _timezone= std::move(value);
+            _timeZone= std::move(value);
             ++offset;
         }
         else if (name == "watermarkText")
@@ -247,6 +247,11 @@ void Session::parseDocOptions(const StringVector& tokens, int& part, std::string
         else if (name == "verifyHost")
         {
             _disableVerifyHost = value == "false";
+            ++offset;
+        }
+        else if (name == "infilterOptions")
+        {
+            _inFilterOptions = std::move(value);
             ++offset;
         }
     }
@@ -352,15 +357,15 @@ void Session::dumpState(std::ostream& os)
        << "\n\t\tisAllowChangeComments: " << _isAllowChangeComments
        << "\n\t\tisEditable: " << isEditable()
        << "\n\t\tdocURL: " << _docURL
-       << "\n\t\tjailedFilePath: " << _jailedFilePath
+       << "\n\t\tjailedFilePath: " << Anonymizer::anonymizeUrl(_jailedFilePath)
        << "\n\t\tdocPwd: " << _docPassword
        << "\n\t\thaveDocPwd: " << _haveDocPassword
        << "\n\t\tisDocPwdProtected: " << _isDocPasswordProtected
        << "\n\t\tDocOptions: " << _docOptions
-       << "\n\t\tuserId: " << _userId
-       << "\n\t\tuserName: " << _userName
+       << "\n\t\tuserId: " << Anonymizer::anonymize(_userId)
+       << "\n\t\tuserName: " << Anonymizer::anonymize(_userName)
        << "\n\t\tlang: " << _lang
-       << "\n\t\ttimezone: " << _timezone
+       << "\n\t\ttimezone: " << _timeZone
        << '\n';
 }
 

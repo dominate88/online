@@ -41,7 +41,8 @@ class ForKitProcess;
 class SocketPoll;
 class TraceFileWriter;
 
-std::shared_ptr<ChildProcess> getNewChild_Blocks(SocketPoll &destPoll, const std::string& configId,
+std::shared_ptr<ChildProcess> getNewChild_Blocks(const std::shared_ptr<SocketPoll>& destPoll,
+                                                 const std::string& configId,
                                                  unsigned mobileAppDocId);
 
 /// The Server class which is responsible for all
@@ -55,7 +56,6 @@ public:
 
     // An Application is a singleton anyway,
     // so just keep these as statics.
-    static std::atomic<uint64_t> NextConnectionId;
     static unsigned int NumPreSpawnedChildren;
 #if !MOBILEAPP
     static bool NoCapsForKit;
@@ -156,11 +156,6 @@ public:
     static std::set<pid_t> getKitPids();
     static std::set<pid_t> getSpareKitPids();
     static std::set<pid_t> getDocKitPids();
-
-    static std::string GetConnectionId()
-    {
-        return Util::encodeId(NextConnectionId++, 3);
-    }
 
     static const std::string& getHardwareResourceWarning()
     {

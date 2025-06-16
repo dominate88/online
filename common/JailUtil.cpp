@@ -566,7 +566,6 @@ bool updateDynamicFilesImpl(const std::string& sysTemplate)
                                      << "], which will be used instead.");
         }
 
-        const Poco::File srcFilePath(srcFilename);
         FileUtil::Stat srcStat(srcFilename);
         if (!srcStat.exists())
             continue;
@@ -575,7 +574,7 @@ bool updateDynamicFilesImpl(const std::string& sysTemplate)
         FileUtil::Stat dstStat(dstFilename);
 
         // Is it outdated?
-        if (dstStat.isUpToDate(srcStat))
+        if (FileUtil::Stat::isUpToDate(srcStat, srcFilename, dstStat, dstFilename))
         {
             LOG_TRC("File [" << dstFilename << "] is already up-to-date.");
             continue;
@@ -612,7 +611,7 @@ bool updateDynamicFilesImpl(const std::string& sysTemplate)
 
             // With parallel tests, another test might have linked already.
             FileUtil::Stat dstStat2(dstFilename);
-            if (dstStat2.isUpToDate(srcStat))
+            if (FileUtil::Stat::isUpToDate(dstStat2, dstFilename, srcStat, srcFilename))
             {
                 LOG_INF("File [" << dstFilename << "] now seems to be up-to-date.");
                 continue;
@@ -632,7 +631,7 @@ bool updateDynamicFilesImpl(const std::string& sysTemplate)
             if (!FileUtil::copyAtomic(srcFilename, dstFilename, true))
             {
                 FileUtil::Stat dstStat2(dstFilename); // Stat again.
-                if (!dstStat2.isUpToDate(srcStat))
+                if (!FileUtil::Stat::isUpToDate(dstStat2, dstFilename, srcStat, srcFilename))
                 {
                     return false; // No point in trying the remaining files.
                 }

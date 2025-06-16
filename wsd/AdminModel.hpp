@@ -12,7 +12,7 @@
 #pragma once
 
 #include <ctime>
-#include <list>
+#include <deque>
 #include <memory>
 #include <regex>
 #include <set>
@@ -26,7 +26,7 @@
 struct DocumentAggregateStats;
 
 /// A client view in Admin controller.
-class View
+class View final
 {
 public:
     View(std::string sessionId, std::string userName, std::string userId, bool readOnly)
@@ -78,13 +78,13 @@ struct DocCleanupSettings
     void setBadBehaviorPeriod(size_t badBehaviorPeriod) { _badBehaviorPeriod = badBehaviorPeriod; }
     size_t getBadBehaviorPeriod() const { return _badBehaviorPeriod; }
     void setIdleTime(size_t idleTime) { _idleTime = idleTime; }
-    size_t getIdleTime() { return _idleTime; }
+    size_t getIdleTime() const { return _idleTime; }
     void setLimitDirtyMem(size_t limitDirtyMem) { _limitDirtyMem = limitDirtyMem; }
     size_t getLimitDirtyMem() const { return _limitDirtyMem; }
     void setLimitCpu(size_t limitCpu) { _limitCpu = limitCpu; }
     size_t getLimitCpu() const { return _limitCpu; }
     void setLostKitGracePeriod(size_t lostKitGracePeriod) { _lostKitGracePeriod = lostKitGracePeriod; }
-    size_t getLostKitGracePeriod() { return _lostKitGracePeriod; }
+    size_t getLostKitGracePeriod() const { return _lostKitGracePeriod; }
 
 private:
     size_t _cleanupInterval;
@@ -127,7 +127,7 @@ private:
 };
 
 /// Containing basic information about document
-class DocBasicInfo
+class DocBasicInfo final
 {
     std::string _docKey;
     std::time_t _idleTime;
@@ -153,16 +153,13 @@ public:
 };
 
 /// A document in Admin controller.
-class Document
+class Document final
 {
-    // cf. FILE* member.
-    Document(const Document &) = delete;
-    Document& operator = (const Document &) = delete;
-
 public:
     Document(const std::string& docKey, pid_t pid,
              const std::string& filename, const Poco::URI& wopiSrc)
-        : _wopiSrc(wopiSrc)
+        : _wopiSrc(wopiSrc.toString())
+        , _hostName(wopiSrc.getHost())
         , _docKey(docKey)
         , _filename(filename)
         , _memoryDirty(0)
@@ -170,11 +167,11 @@ public:
         , _start(std::time(nullptr))
         , _lastActivity(_start)
         , _end(0)
+        , _lastSnapshotTime(0)
         , _sentBytes(0)
         , _recvBytes(0)
         , _wopiDownloadDuration(0)
         , _wopiUploadDuration(0)
-        , _procSMaps(nullptr)
         , _lastTimeSMapsRead(0)
         , _badBehaviorDetectionTime(0)
         , _abortTime(0)
@@ -187,21 +184,15 @@ public:
     {
     }
 
-    ~Document()
-    {
-        if (_procSMaps)
-            fclose(_procSMaps);
-    }
-
     std::string getDocKey() const { return _docKey; }
 
     pid_t getPid() const { return _pid; }
 
     std::string getFilename() const { return _filename; }
 
-    std::string getHostName() const { return _wopiSrc.getHost(); }
+    std::string getHostName() const { return _hostName; }
 
-    std::string getWopiSrc() const { return _wopiSrc.toString(); }
+    std::string getWopiSrc() const { return _wopiSrc; }
 
     bool isExpired() const { return _end != 0 && std::time(nullptr) >= _end; }
 
@@ -217,15 +208,16 @@ public:
 
     size_t getLastJiffies() const { return _lastJiffy; }
     void setLastJiffies(size_t newJ);
-    unsigned getLastCpuPercentage(){ return _lastCpuPercentage; }
+    unsigned getLastCpuPercentage() const { return _lastCpuPercentage; }
 
     const std::map<std::string, View>& getViews() const { return _views; }
 
-    void updateLastActivityTime() { _lastActivity = std::time(nullptr); }
+    void updateLastActivityTime(std::time_t lastActivity) { _lastActivity = lastActivity; }
+    std::time_t getLastActivityTime() const { return _lastActivity; }
     void updateMemoryDirty();
     size_t getMemoryDirty() const { return _memoryDirty; }
 
-    std::pair<std::time_t, std::string> getSnapshot() const;
+    std::string getSnapshot(std::time_t now) const;
     const std::string getHistory() const;
     void takeSnapshot();
 
@@ -249,7 +241,7 @@ public:
     std::chrono::milliseconds getWopiDownloadDuration() const { return _wopiDownloadDuration; }
     void setWopiUploadDuration(const std::chrono::milliseconds wopiUploadDuration) { _wopiUploadDuration = wopiUploadDuration; }
     std::chrono::milliseconds getWopiUploadDuration() const { return _wopiUploadDuration; }
-    void setProcSMapsFD(const int smapsFD) { _procSMaps = fdopen(smapsFD, "r"); }
+    void setProcSMapsFp(std::weak_ptr<FILE> procSMaps) { _procSMaps = procSMaps; }
     bool hasMemDirtyChanged() const { return _hasMemDirtyChanged; }
     void setMemDirtyChanged(bool changeStatus) { _hasMemDirtyChanged = changeStatus; }
     time_t getBadBehaviorDetectionTime() const { return _badBehaviorDetectionTime; }
@@ -260,11 +252,12 @@ public:
     std::string to_string() const;
 
 private:
-    Poco::URI _wopiSrc;
+    std::string _wopiSrc;
+    std::string _hostName;
     /// SessionId mapping to View object
     std::map<std::string, View> _views;
-    std::map<std::time_t,std::string> _snapshots;
-    const std::string _docKey;
+    std::vector<std::string> _snapshots;
+    std::string _docKey;
     /// Hosted filename
     std::string _filename;
     /// The dirty (ie. un-shared) memory of the document's Kit process.
@@ -275,6 +268,7 @@ private:
     std::time_t _start;
     std::time_t _lastActivity;
     std::time_t _end;
+    std::time_t _lastSnapshotTime;
 
     /// Total bytes sent and recv'd by this document.
     uint64_t _sentBytes, _recvBytes;
@@ -283,13 +277,13 @@ private:
     std::chrono::milliseconds _wopiDownloadDuration;
     std::chrono::milliseconds _wopiUploadDuration;
 
-    FILE* _procSMaps;
+    std::weak_ptr<FILE> _procSMaps;
     std::time_t _lastTimeSMapsRead;
 
     std::time_t _badBehaviorDetectionTime;
     std::time_t _abortTime;
 
-    const pid_t _pid;
+    pid_t _pid;
     /// Total number of active views
     unsigned _activeViews;
 
@@ -302,7 +296,7 @@ private:
 };
 
 /// An Admin session subscriber.
-class Subscriber
+class Subscriber final
 {
 public:
     explicit Subscriber(std::weak_ptr<WebSocketHandler> ws)
@@ -338,7 +332,7 @@ private:
 };
 
 /// The Admin controller implementation.
-class AdminModel
+class AdminModel final
 {
     AdminModel(const AdminModel &) = delete;
     AdminModel& operator = (const AdminModel &) = delete;
@@ -359,8 +353,8 @@ public:
     std::string getAllHistory() const;
 
     /// Returns memory consumed by all active coolkit processes
-    unsigned getKitsMemoryUsage();
-    size_t getKitsJiffies();
+    unsigned getKitsMemoryUsage() const;
+    size_t getKitsJiffies() const;
 
     void subscribe(int sessionId, const std::weak_ptr<WebSocketHandler>& ws);
     void subscribe(int sessionId, const std::string& command);
@@ -393,18 +387,19 @@ public:
 
     void addDocument(const std::string& docKey, pid_t pid, const std::string& filename,
                      const std::string& sessionId, const std::string& userName,
-                     const std::string& userId, int smapsFD, const Poco::URI& wopiSrc,
-                     bool readOnly);
+                     const std::string& userId, const std::weak_ptr<FILE>& smapsFp,
+                     const Poco::URI& wopiSrc, bool readOnly);
 
     void removeDocument(const std::string& docKey, const std::string& sessionId);
     void removeDocument(const std::string& docKey);
 
     void updateLastActivityTime(const std::string& docKey);
+    std::time_t getLastActivityTime() const { return _lastActivity; }
 
     void addBytes(const std::string& docKey, uint64_t sent, uint64_t recv);
 
-    uint64_t getSentBytesTotal() { return _sentBytesTotal; }
-    uint64_t getRecvBytesTotal() { return _recvBytesTotal; }
+    uint64_t getSentBytesTotal() const { return _sentBytesTotal; }
+    uint64_t getRecvBytesTotal() const { return _recvBytesTotal; }
 
     static double getServerUptimeSecs();
 
@@ -421,7 +416,7 @@ public:
     void setForKitPid(pid_t pid) { _forKitPid = pid; }
     void addLostKitsTerminated(unsigned lostKitsTerminated);
 
-    void getMetrics(std::ostringstream &oss);
+    void getMetrics(std::ostream& oss) const;
 
     std::set<pid_t> getDocumentPids() const;
     void UpdateMemoryDirty();
@@ -438,47 +433,49 @@ public:
     bool isDocReadOnly(const std::string&);
     void setMigratingInfo(const std::string& docKey, const std::string& routeToken, const std::string& serverId);
     void resetMigratingInfo();
-    std::string getCurrentMigDoc() { return _currentMigDoc; }
-    std::string getCurrentMigToken() { return _currentMigToken; }
-    std::string getTargetMigServerId() { return _targetMigServerId; }
+    std::string getCurrentMigDoc() const { return _currentMigDoc; }
+    std::string getCurrentMigToken() const { return _currentMigToken; }
+    std::string getTargetMigServerId() const { return _targetMigServerId; }
     void sendMigrateMsgAfterSave(bool lastSaveSuccessful, const std::string& docKey);
-    std::string getWopiSrcMap();
-    std::string getFilename(int pid);
+    std::string getWopiSrcMap() const;
+    std::string getFilename(int pid) const;
     void routeTokenSanityCheck();
     void sendShutdownReceivedMsg();
 
 private:
-    void doRemove(std::map<std::string, std::unique_ptr<Document>>::iterator &docIt);
+    void doRemove(std::map<std::string, Document>::iterator &docIt);
 
-    std::string getMemStats();
+    std::string getMemStats() const;
 
-    std::string getSentActivity();
+    std::string getSentActivity() const;
 
-    std::string getRecvActivity();
+    std::string getRecvActivity() const;
 
-    std::string getConnectionActivity();
+    std::string getConnectionActivity() const;
 
-    std::string getCpuStats();
+    std::string getCpuStats() const;
 
-    unsigned getTotalActiveViews();
+    unsigned getTotalActiveViews() const;
 
     std::string getDocuments() const;
 
-    void CalcDocAggregateStats(DocumentAggregateStats& stats);
+    void CalcDocAggregateStats(DocumentAggregateStats& stats) const;
 
 private:
     DocProcSettings _defDocProcSettings;
 
     std::map<int, Subscriber> _subscribers;
-    std::map<std::string, std::unique_ptr<Document>> _documents;
-    std::map<std::string, std::unique_ptr<Document>> _expiredDocuments;
+    std::map<std::string, Document> _documents;
+
+    /// The serialized histories of all expired documents.
+    std::vector<std::string> _expiredDocumentsHistories;
 
     /// The last N total memory Dirty size.
-    std::list<unsigned> _memStats;
-    std::list<unsigned> _cpuStats;
-    std::list<unsigned> _sentStats;
-    std::list<unsigned> _recvStats;
-    std::list<size_t> _connStats;
+    std::deque<unsigned> _memStats;
+    std::deque<unsigned> _cpuStats;
+    std::deque<unsigned> _sentStats;
+    std::deque<unsigned> _recvStats;
+    std::deque<size_t> _connStats;
 
     uint64_t _sentBytesTotal = 0;
     uint64_t _recvBytesTotal = 0;
@@ -488,14 +485,16 @@ private:
     uint64_t _killedCount = 0;
     uint64_t _oomKilledCount = 0;
 
+    std::time_t _lastActivity = 0;
+
     /// We check the owner even in the release builds, needs to be always correct.
     std::thread::id _owner;
 
-    std::string _currentMigDoc = std::string();
+    std::string _currentMigDoc;
 
-    std::string _currentMigToken = std::string();
+    std::string _currentMigToken;
 
-    std::string _targetMigServerId = std::string();
+    std::string _targetMigServerId;
 
     unsigned _memStatsSize = 100;
     unsigned _cpuStatsSize = 100;

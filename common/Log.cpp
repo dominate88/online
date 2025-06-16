@@ -11,12 +11,6 @@
 
 #include <config.h>
 
-#ifdef __linux__
-#include <sys/prctl.h>
-#include <sys/syscall.h>
-#endif
-#include <unistd.h>
-
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -28,9 +22,12 @@
 #include <string>
 #include <unordered_map>
 
+#include <unistd.h>
+
 #include <Poco/AutoPtr.h>
 #include <Poco/FileChannel.h>
 #include <Poco/Logger.h>
+#include <Poco/Version.h>
 
 #include "Log.hpp"
 #include "Util.hpp"
@@ -39,15 +36,6 @@ namespace
 {
 /// Tracks the number of thread-local buffers (for debugging purposes).
 std::atomic_int32_t ThreadLocalBufferCount(0);
-
-#if WASMAPP
-/// In WASM, stdout works best.
-constexpr int LOG_FILE_FD = STDOUT_FILENO;
-#else
-/// By default, write to stderr.
-constexpr int LOG_FILE_FD = STDERR_FILENO;
-#endif
-
 } // namespace
 
 /// Which log areas should be disabled
@@ -92,7 +80,17 @@ public:
             break;
 #undef MAP
         }
-        log(text, prio);
+
+        if (getLevel() < prio)
+            return;
+#if POCO_VERSION >= 0x010D0000
+        Poco::Channel* pChannel = getChannel().get();
+#else
+        auto pChannel = getChannel();
+#endif
+        if (!pChannel)
+            return;
+        pChannel->log(Poco::Message(name(), text, prio));
     }
 
     static Log::Level mapToLevel(Poco::Message::Priority prio)
@@ -126,25 +124,33 @@ namespace Log
         void close() override { flush(); }
 
         /// Write the given buffer to stderr directly.
-        static inline int writeRaw(const char* data, std::size_t size)
+        static inline std::size_t writeRaw(const char* data, std::size_t count)
         {
-            std::size_t i = 0;
-            for (; i < size;)
+#if WASMAPP
+            // In WASM, stdout works best.
+            constexpr int LOG_FILE_FD = STDOUT_FILENO;
+#else
+            // By default, write to stderr.
+            constexpr int LOG_FILE_FD = STDERR_FILENO;
+#endif
+
+            const char *ptr = data;
+            while (count > 0)
             {
-                int wrote;
-                while ((wrote = ::write(LOG_FILE_FD, data + i, size - i)) < 0 && errno == EINTR)
+                ssize_t wrote;
+                while ((wrote = ::write(LOG_FILE_FD, ptr, count)) < 0 && errno == EINTR)
                 {
                 }
 
                 if (wrote < 0)
                 {
-                    return i;
+                    break;
                 }
 
-                i += wrote;
+                ptr += wrote;
+                count -= wrote;
             }
-
-            return i;
+            return ptr - data;
         }
 
         template <std::size_t N> inline void writeRaw(const char (&data)[N])
@@ -184,6 +190,8 @@ namespace Log
         }
     };
 
+    void preFork() { flush(); }
+
     void postFork()
     {
         /// after forking we can end up with threads that
@@ -217,6 +225,7 @@ namespace Log
             std::size_t size() const { return _size; }
             std::size_t available() const { return BufferSize - _size; }
 
+            /// Flush internal buffers, if any.
             inline void flush()
             {
                 if (_size)
@@ -266,17 +275,10 @@ namespace Log
                 assert(_size <= BufferSize && "Buffer overflow");
             }
 
-        template <std::size_t N> inline void buffer(const char (&data)[N])
-        {
-            buffer(data, N - 1); // Minus the null.
-        }
-
-        inline void buffer(const std::string& string) { buffer(string.data(), string.size()); }
-
-    private:
-        char _buffer[BufferSize];
-        std::size_t _size;
-        std::int64_t _oldest_time_us; ///< The timestamp of the oldest buffered entry.
+        private:
+            char _buffer[BufferSize];
+            std::size_t _size;
+            std::int64_t _oldest_time_us; ///< The timestamp of the oldest buffered entry.
         };
 
     protected:
@@ -285,18 +287,14 @@ namespace Log
 
         inline void buffer(const char* data, std::size_t size) { _tlb.buffer(data, size); }
 
-        template <std::size_t N> inline void buffer(const char (&data)[N])
-        {
-            buffer(data, N - 1); // Minus the null.
-        }
-
-        inline void buffer(const std::string& string) { buffer(string.data(), string.size()); }
+        inline void buffer(const std::string_view string) { buffer(string.data(), string.size()); }
 
     public:
         ~BufferedConsoleChannel() { flush(); }
 
         void close() override { flush(); }
 
+        /// Flush buffers, if any.
         static inline void flush() { _tlb.flush(); }
 
         void log(const Poco::Message& msg) override
@@ -513,11 +511,14 @@ namespace Log
         return buf + i;
     }
 
-    char* prefix(const timeval& tv, char* buffer, const char* level)
+    char* prefix(const std::chrono::time_point<std::chrono::system_clock>& tp,
+                 char* buffer,
+                 const char* level)
     {
 #if defined(IOS) || defined(__FreeBSD__)
-        // Don't bother with the "Source" which would be just "Mobile" always and non-informative as
-        // there is just one process in the app anyway.
+        // Don't bother with the "Source" which would be just "Mobile" always (or whatever the app
+        // process is called depending on platform and configuration) and non-informative as there
+        // is just one process in the app anyway.
 
         // FIXME: Not sure why FreeBSD is here, too. Surely on FreeBSD COOL runs just like on Linux,
         // as a set of separate processes, so it would be useful to see from which process a log
@@ -561,9 +562,9 @@ namespace Log
         *pos++ = ' ';
 #endif
 
-        const time_t tv_sec = tv.tv_sec;
-        struct tm tm;
-        localtime_r(&tv_sec, &tm);
+        auto t = std::chrono::system_clock::to_time_t(tp);
+        std::tm tm;
+        Util::time_t_to_localtime(t, tm);
 
         // YYYY-MM-DD.
         to_ascii_fixed<4>(pos, tm.tm_year + 1900);
@@ -586,7 +587,9 @@ namespace Log
         to_ascii_fixed<2>(pos, tm.tm_sec);
         pos[2] = '.';
         pos += 3;
-        to_ascii_fixed<6>(pos, tv.tv_usec);
+        auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(tp.time_since_epoch());
+        auto fractional_seconds = microseconds.count() % 1000000;
+        to_ascii_fixed<6>(pos, fractional_seconds);
         pos[6] = ' ';
         pos += 7;
 
@@ -624,7 +627,7 @@ namespace Log
         std::ostringstream oss;
         oss << Static.getName();
         if constexpr (!Util::isMobileApp())
-            oss << '-' << std::setw(5) << std::setfill('0') << getpid();
+            oss << '-' << std::setw(5) << std::setfill('0') << Util::getProcessId();
         Static.setId(oss.str());
 
         // Configure the logger.
@@ -684,7 +687,7 @@ namespace Log
         const std::time_t t = std::time(nullptr);
         struct tm tm;
         LOG_INF("Initializing " << name << ". Local time: "
-                                << std::put_time(localtime_r(&t, &tm), "%a %F %T %z")
+                                << std::put_time(Util::time_t_to_localtime(t, tm), "%a %F %T %z")
                                 << ". Log level is [" << logger->getLevel() << ']');
 
         StaticUILog.setName(name+"_ui");
@@ -796,15 +799,11 @@ namespace Log
         Poco::Logger::shutdown();
 
         flush();
+
+        ::fflush(nullptr); // Flush all open output streams.
     }
 
-    void flush()
-    {
-        BufferedConsoleChannel::flush();
-
-        fflush(stdout);
-        fflush(stderr);
-    }
+    void flush() { BufferedConsoleChannel::flush(); }
 
     void setThreadLocalLogLevel(const std::string& logLevel)
     {

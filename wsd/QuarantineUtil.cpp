@@ -51,7 +51,9 @@ Quarantine::Quarantine(DocumentBroker& docBroker, const std::string& docName)
     , _docName(Uri::encode(docName, std::string(",/?:@&=+$#") + Delimiter))
     , _quarantinedFilename(Delimiter + std::to_string(docBroker.getPid()) + Delimiter + _docName)
 {
-    LOG_DBG("Quarantine ctor for [" << _docKey << "], filename: [" << _quarantinedFilename << ']');
+    std::string anonymizedFilename = _quarantinedFilename;
+    Util::replaceAllSubStr(anonymizedFilename, _docName, COOLWSD::anonymizeUsername(_docName));
+    LOG_DBG("Quarantine ctor for [" << _docKey << "], filename: [" << anonymizedFilename << ']');
 }
 
 void Quarantine::initialize(const std::string& path)
@@ -397,15 +399,15 @@ bool Quarantine::quarantineFile(const std::string& docKey, const std::string& do
     auto& fileList = QuarantineMap[docKey];
     if (!fileList.empty())
     {
-        const auto& lastFile = fileList[fileList.size() - 1];
-        FileUtil::Stat lastFileStat(lastFile.fullPath());
+        const std::string lastFile = fileList[fileList.size() - 1].fullPath();
+        FileUtil::Stat lastFileStat(lastFile);
 
-        if (lastFileStat.isIdenticalTo(sourceStat))
+        if (FileUtil::Stat::isIdenticalTo(lastFileStat, lastFile, sourceStat, docPath))
         {
             LOG_INF("Quarantining of file ["
                     << docPath << "] to [" << linkedFilePath
                     << "] is skipped because this file version is already quarantined as ["
-                    << lastFile.fullPath() << ']');
+                    << lastFile << ']');
             return false;
         }
     }
@@ -506,7 +508,7 @@ Quarantine::Entry::Entry(const std::string& root, const std::string& docKey,
 
     _secondsSinceEpoch = secondsSinceEpoch;
 
-    _pid = getpid();
+    _pid = Util::getProcessId();
 
     _filename = filename;
 

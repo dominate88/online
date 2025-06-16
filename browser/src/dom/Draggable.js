@@ -85,8 +85,6 @@ L.Draggable = L.Evented.extend({
 			L.DomUtil.preventOutline(this._element);
 		}
 
-		if (L.DomUtil.hasClass(this._element, 'leaflet-zoom-anim')) { return; }
-
 		L.DomUtil.disableImageDrag();
 		L.DomUtil.disableTextSelection();
 
@@ -178,7 +176,7 @@ L.Draggable = L.Evented.extend({
 		app.util.cancelAnimFrame(this._animRequest);
 		this._lastEvent = e;
 
-		this._animRequest = app.util.requestAnimFrame(this._updatePosition, this, true, this._dragStartTarget);
+		this._animRequest = app.util.requestAnimFrame(this._updatePosition, this);
 	},
 
 	_updatePosition: function () {

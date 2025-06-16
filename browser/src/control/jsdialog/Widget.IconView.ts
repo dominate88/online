@@ -33,7 +33,14 @@ function _createEntryImage(
 ) {
 	const img = L.DomUtil.create('img', builder.options.cssClass, parent);
 	if (image) img.src = image;
-	img.alt = entryData.text;
+
+	if (entryData.text) {
+		img.alt = entryData.text;
+	} else if (entryData.tooltip) {
+		img.alt = entryData.tooltip;
+	} else {
+		img.alt = '';
+	}
 
 	if (entryData.tooltip) img.title = entryData.tooltip;
 	else img.title = entryData.text;
@@ -117,7 +124,10 @@ function _iconViewEntry(
 	if (!disabled) {
 		const singleClick = parentData.singleclickactivate === true;
 		$(entryContainer).click(function () {
-			$('#' + parentData.id + ' .ui-treeview-entry').removeClass('selected');
+			//avoid re-selecting already selected entry
+			if ($(entryContainer).hasClass('selected')) return;
+
+			$('#' + parentData.id + ' .ui-iconview-entry').removeClass('selected');
 			builder.callback('iconview', 'select', parentData, entry.row, builder);
 			if (singleClick) {
 				builder.callback(
@@ -129,9 +139,23 @@ function _iconViewEntry(
 				);
 			}
 		});
+
+		entryContainer.addEventListener('contextmenu', function (e: Event) {
+			$('#' + parentData.id + ' .ui-iconview-entry').removeClass('selected');
+			builder.callback('iconview', 'select', parentData, entry.row, builder);
+			$(entryContainer).addClass('selected');
+			builder.callback(
+				'iconview',
+				'contextmenu',
+				parentData,
+				entry.row,
+				builder,
+			);
+			e.preventDefault();
+		});
+
 		if (!singleClick) {
 			$(entryContainer).dblclick(function () {
-				$('#' + parentData.id + ' .ui-treeview-entry').removeClass('selected');
 				builder.callback(
 					'iconview',
 					'activate',
@@ -218,6 +242,26 @@ JSDialog.iconView = function (
 			if (hasText) _createEntryText(container, entry);
 		}
 	};
+
+	JSDialog.KeyboardGridNavigation(container);
+	container.addEventListener('keydown', function (e: KeyboardEvent) {
+		if (e.key !== 'Enter' && e.key !== ' ' && e.code !== 'Space') return;
+
+		const active = document.activeElement as HTMLElement;
+		if (!active || !active.classList.contains('ui-iconview-entry')) return;
+
+		const iconViewEntries = Array.from(
+			container.querySelectorAll('.ui-iconview-entry'),
+		);
+		const selectedIndex = iconViewEntries.indexOf(active);
+
+		if (selectedIndex === -1) return;
+
+		if (e.key === ' ' || e.code === 'Space')
+			builder.callback('iconview', 'select', data, selectedIndex, builder);
+		else if (e.key === 'Enter')
+			builder.callback('iconview', 'activate', data, selectedIndex, builder);
+	});
 
 	return false;
 };

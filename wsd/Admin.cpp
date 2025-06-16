@@ -48,9 +48,6 @@ using namespace COOLProtocol;
 
 using Poco::Util::Application;
 
-const int Admin::MinStatsIntervalMs = 50;
-const int Admin::DefStatsIntervalMs = 1000;
-
 /// Process incoming websocket messages
 void AdminSocketHandler::handleMessage(const std::vector<char> &payload)
 {
@@ -430,6 +427,8 @@ void AdminSocketHandler::handleMessage(const std::vector<char> &payload)
     }
 }
 
+std::atomic<uint64_t> AdminSocketHandler::NextSessionId(1);
+
 AdminSocketHandler::AdminSocketHandler(Admin* adminManager,
                                        const std::weak_ptr<StreamSocket>& socket,
                                        const Poco::Net::HTTPRequest& request,
@@ -438,8 +437,7 @@ AdminSocketHandler::AdminSocketHandler(Admin* adminManager,
     , _admin(adminManager)
     , _isAuthenticated(false)
 {
-    // Different session id pool for admin sessions (?)
-    _sessionId = Util::decodeId(COOLWSD::GetConnectionId());
+    _sessionId = NextSessionId++;
     _clientIPAdress = socket.lock()->clientAddress();
 }
 
@@ -448,7 +446,7 @@ AdminSocketHandler::AdminSocketHandler(Admin* adminManager)
       _admin(adminManager),
       _isAuthenticated(true)
 {
-    _sessionId = Util::decodeId(COOLWSD::GetConnectionId());
+    _sessionId = NextSessionId++;
 }
 
 void AdminSocketHandler::sendTextFrame(const std::string& message)
@@ -597,7 +595,7 @@ Admin::Admin()
         LOG_WRN("Low memory condition detected: only " << _totalAvailMemKb / 1024
                                                        << " MB of RAM available");
 
-    LOG_INF("hardware threads: " << std::thread::hardware_concurrency());
+    LOG_INF("Hardware threads: " << std::thread::hardware_concurrency());
 }
 
 Admin::~Admin()
@@ -712,12 +710,16 @@ void Admin::pollingThread()
         bool dumpMetrics = true;
         if (_dumpMetrics.compare_exchange_strong(dumpMetrics, false))
         {
-            std::ostringstream oss;
-            oss << "Admin Metrics:\n";
-            getMetrics(oss);
+            std::ostringstream oss(Util::makeDumpStateStream());
+            oss << "Start Admin " << getpid() << " Dump State:\n";
+
+            dumpState(oss);
+
+            oss << "End Admin " << getpid() << " Dump State.\n";
+
             const std::string str = oss.str();
-            fprintf(stderr, "%s\n", str.c_str());
-            LOG_TRC(str);
+            fprintf(stderr, "%s", str.c_str());
+            LOG_WRN(str);
         }
 
         // Handle websockets & other work.
@@ -751,8 +753,8 @@ void Admin::pollingThread()
 
     _model.sendShutdownReceivedMsg();
 
-    static const std::chrono::microseconds closeMonitorMsgTimeout = std::chrono::seconds(
-        ConfigUtil::getConfigValue<int>("indirection_endpoint.migration_timeout_secs", 180));
+    static const std::chrono::microseconds closeMonitorMsgTimeout = ConfigUtil::getConfigValue(
+        "indirection_endpoint.migration_timeout_secs", std::chrono::seconds(180));
 
     std::chrono::time_point<std::chrono::steady_clock> closeMonitorMsgStartTime =
         std::chrono::steady_clock::now();
@@ -789,10 +791,10 @@ void Admin::uploadedAlert(const std::string& docKey, pid_t pid, bool value)
 
 void Admin::addDoc(const std::string& docKey, pid_t pid, const std::string& filename,
                    const std::string& sessionId, const std::string& userName, const std::string& userId,
-                   const int smapsFD, const std::string& wopiSrc, bool readOnly)
+                   const std::weak_ptr<FILE>& smapsFp, const std::string& wopiSrc, bool readOnly)
 {
-    addCallback([this, docKey, pid, filename, sessionId, userName, userId, smapsFD, wopiSrc, readOnly] {
-        _model.addDocument(docKey, pid, filename, sessionId, userName, userId, smapsFD, Poco::URI(wopiSrc), readOnly);
+    addCallback([this, docKey, pid, filename, sessionId, userName, userId, smapsFp, wopiSrc, readOnly] {
+        _model.addDocument(docKey, pid, filename, sessionId, userName, userId, smapsFp, Poco::URI(wopiSrc), readOnly);
     });
 }
 
@@ -823,25 +825,29 @@ void Admin::rescheduleCpuTimer(unsigned interval)
     wakeup();
 }
 
-size_t Admin::getTotalMemoryUsage()
+std::time_t Admin::getLastActivityTime() const
+{
+    return _model.getLastActivityTime();
+}
+
+size_t Admin::getTotalMemoryUsage() const
 {
     // To simplify and clarify this; since load, link and pre-init all
     // inside the forkit - we should account all of our fixed cost of
     // memory to the forkit; and then count only dirty pages in the clients
     // since we know that they share everything else with the forkit.
     const size_t forkitRssKb = Util::getMemoryUsageRSS(_forKitPid);
-    const size_t wsdPssKb = Util::getMemoryUsagePSS(getpid());
+    const size_t wsdPssKb = Util::getMemoryUsagePSS(Util::getProcessId());
     const size_t kitsDirtyKb = _model.getKitsMemoryUsage();
     const size_t totalMem = wsdPssKb + forkitRssKb + kitsDirtyKb;
 
     return totalMem;
 }
 
-size_t Admin::getTotalCpuUsage()
+size_t Admin::getTotalCpuUsage() const
 {
     const size_t forkitJ = Util::getCpuUsage(_forKitPid);
-    const size_t wsdJ = Util::getCpuUsage(getpid());
-    const size_t kitsJ = _model.getKitsJiffies();
+    const size_t wsdJ = Util::getCpuUsage(Util::getProcessId());
 
     if (_lastJiffies == 0)
     {
@@ -849,31 +855,32 @@ size_t Admin::getTotalCpuUsage()
         return 0;
     }
 
+    const size_t kitsJ = _model.getKitsJiffies();
     const size_t totalJ = ((forkitJ + wsdJ) - _lastJiffies) + kitsJ;
     _lastJiffies = forkitJ + wsdJ;
 
     return totalJ;
 }
 
-unsigned Admin::getMemStatsInterval()
+unsigned Admin::getMemStatsInterval() const
 {
     ASSERT_CORRECT_THREAD();
     return _memStatsTaskIntervalMs;
 }
 
-unsigned Admin::getCpuStatsInterval()
+unsigned Admin::getCpuStatsInterval() const
 {
     ASSERT_CORRECT_THREAD();
     return _cpuStatsTaskIntervalMs;
 }
 
-unsigned Admin::getNetStatsInterval()
+unsigned Admin::getNetStatsInterval() const
 {
     ASSERT_CORRECT_THREAD();
     return _netStatsTaskIntervalMs;
 }
 
-std::string Admin::getChannelLogLevels()
+std::string Admin::getChannelLogLevels() const
 {
     std::string result = "wsd=" + Log::getLogLevelName("wsd");
 
@@ -897,7 +904,7 @@ void Admin::setChannelLogLevel(const std::string& channelName, std::string level
     }
 }
 
-std::string Admin::getLogLines()
+std::string Admin::getLogLines() const
 {
     ASSERT_CORRECT_THREAD();
 
@@ -1138,10 +1145,22 @@ void Admin::cleanupLostKits()
 
 void Admin::dumpState(std::ostream& os) const
 {
-    // FIXME: be more helpful ...
     SocketPoll::dumpState(os);
-}
 
+    os << "Monitor sockets: " << _monitorSockets.size() << ":\n";
+    if (!_monitorSockets.empty())
+    {
+        for (const auto& socket : _monitorSockets)
+        {
+            os << socket.first << ": " << (socket.second->isConnected() ? "" : "dis")
+               << "connected\n";
+        }
+    }
+
+    os << "Admin Metrics:\n";
+    getMetrics(os);
+    os << '\n';
+}
 
 MonitorSocketHandler::MonitorSocketHandler(Admin *admin, const std::string &uri)
     : AdminSocketHandler(admin)
@@ -1224,10 +1243,10 @@ void Admin::scheduleMonitorConnect(const std::string &uri, std::chrono::steady_c
     _pendingConnects.push_back(std::move(todo));
 }
 
-void Admin::getMetrics(std::ostringstream &metrics)
+void Admin::getMetrics(std::ostream& metrics) const
 {
-    size_t memAvail =  getTotalAvailableMemory();
-    size_t memUsed = getTotalMemoryUsage();
+    const size_t memAvail = getTotalAvailableMemory();
+    const size_t memUsed = getTotalMemoryUsage();
 
     metrics << "global_host_system_memory_bytes " << _totalSysMemKb * 1024 << std::endl;
     metrics << "global_host_tcp_connections " << net::Defaults.maxExtConnections << std::endl;
@@ -1249,7 +1268,7 @@ void Admin::sendMetrics(const std::shared_ptr<StreamSocket>& socket,
     response->setBody(oss.str(), "text/plain");
 
     socket->send(*response);
-    socket->shutdown();
+    socket->asyncShutdown();
 
     static bool skipAuthentication =
         ConfigUtil::getConfigValue<bool>("security.enable_metrics_unauthenticated", false);
@@ -1267,7 +1286,7 @@ void Admin::start()
     startThread();
 }
 
-std::vector<std::pair<std::string, int>> Admin::getMonitorList()
+std::vector<std::pair<std::string, int>> Admin::getMonitorList() const
 {
     const auto& config = Application::instance().config();
     std::vector<std::pair<std::string, int>> monitorList;

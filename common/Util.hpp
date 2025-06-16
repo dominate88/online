@@ -14,14 +14,12 @@
 #include <cassert>
 #include <cerrno>
 #include <chrono>
-#include <cinttypes>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <algorithm>
 #include <limits>
 #include <mutex>
-#include <set>
 #include <sstream>
 #include <string>
 #include <map>
@@ -355,17 +353,16 @@ namespace Util
     /// Replace any characters in @a matching characters in @b with replacement chars in @c and return
     std::string replaceAllOf(std::string_view str, std::string_view match, std::string_view repl);
 
+    void replaceAllSubStr(std::string& input, const std::string& target, const std::string& replacement);
+
     std::string formatLinesForLog(const std::string& s);
 
     void setThreadName(const std::string& s);
 
     const char *getThreadName();
 
-#if defined __linux__
-    pid_t getThreadId();
-#else
     long getThreadId();
-#endif
+    long getProcessId();
 
     void killThreadById(int tid, int signal);
 
@@ -417,6 +414,18 @@ namespace Util
 #endif
 
     size_t findInVector(const std::vector<char>& tokens, const char *cstring, std::size_t offset = 0);
+
+    /// Copy from @in to @out until @search is found.
+    /// On a match return is true, the read position of @in will be at the
+    /// start of @search and @out has a copy of @in appended as far as @search.
+    /// On no match return is false, the read position of @in will be at eof
+    /// and @out is appended to @in.
+    bool copyToMatch(std::istream& in, std::ostream& out, std::string_view search);
+
+    /// On a match return is true, the read position of @in will be at the
+    /// start of @search.
+    /// On no match return is false, the read position of @ will be at eof.
+    bool seekToMatch(std::istream& in, std::string_view search);
 
     /// Trim trailing characters (on the right).
     inline std::string_view rtrim(const std::string_view s, const char ch)
@@ -490,7 +499,7 @@ namespace Util
         return trimmed(std::string(s));
     }
 
-#ifdef IOS
+#if !HAVE_MEMRCHR
 
     inline void *memrchr(const void *s, int c, size_t n)
     {
@@ -588,7 +597,9 @@ int main(int argc, char**argv)
         case ENOMEM: return "ENOMEM";
         case EACCES: return "EACCES";
         case EFAULT: return "EFAULT";
+#ifdef ENOTBLK
         case ENOTBLK: return "ENOTBLK";
+#endif
         case EBUSY: return "EBUSY";
         case EEXIST: return "EEXIST";
         case EXDEV: return "EXDEV";
@@ -671,7 +682,9 @@ int main(int argc, char**argv)
 #ifdef ENOPKG
         case ENOPKG: return "ENOPKG";
 #endif
+#ifdef EREMOTE
         case EREMOTE: return "EREMOTE";
+#endif
         case ENOLINK: return "ENOLINK";
 #ifdef EADV
         case EADV: return "EADV";
@@ -683,7 +696,9 @@ int main(int argc, char**argv)
         case ECOMM: return "ECOMM";
 #endif
         case EPROTO: return "EPROTO";
+#ifdef EMULTIHOP
         case EMULTIHOP: return "EMULTIHOP";
+#endif
 #ifdef EDOTDOT
         case EDOTDOT: return "EDOTDOT";
 #endif
@@ -720,16 +735,22 @@ int main(int argc, char**argv)
 #ifdef ESTRPIPE
         case ESTRPIPE: return "ESTRPIPE";
 #endif
+#ifdef EUSERS
         case EUSERS: return "EUSERS";
+#endif
         case ENOTSOCK: return "ENOTSOCK";
         case EDESTADDRREQ: return "EDESTADDRREQ";
         case EMSGSIZE: return "EMSGSIZE";
         case EPROTOTYPE: return "EPROTOTYPE";
         case ENOPROTOOPT: return "ENOPROTOOPT";
         case EPROTONOSUPPORT: return "EPROTONOSUPPORT";
+#ifdef ESOCKTNOSUPPORT
         case ESOCKTNOSUPPORT: return "ESOCKTNOSUPPORT";
+#endif
         case EOPNOTSUPP: return "EOPNOTSUPP";
+#ifdef EPFNOSUPPORT
         case EPFNOSUPPORT: return "EPFNOSUPPORT";
+#endif
         case EAFNOSUPPORT: return "EAFNOSUPPORT";
         case EADDRINUSE: return "EADDRINUSE";
         case EADDRNOTAVAIL: return "EADDRNOTAVAIL";
@@ -739,17 +760,29 @@ int main(int argc, char**argv)
         case ECONNABORTED: return "ECONNABORTED";
         case ECONNRESET: return "ECONNRESET";
         case ENOBUFS: return "ENOBUFS";
+#ifdef EISCONN
         case EISCONN: return "EISCONN";
+#endif
+#ifdef ENOTCONN
         case ENOTCONN: return "ENOTCONN";
+#endif
+#ifdef ESHUTDOWN
         case ESHUTDOWN: return "ESHUTDOWN";
+#endif
+#ifdef ETOOMANYREFS
         case ETOOMANYREFS: return "ETOOMANYREFS";
+#endif
         case ETIMEDOUT: return "ETIMEDOUT";
         case ECONNREFUSED: return "ECONNREFUSED";
+#ifdef EHOSTDOWN
         case EHOSTDOWN: return "EHOSTDOWN";
+#endif
         case EHOSTUNREACH: return "EHOSTUNREACH";
         case EALREADY: return "EALREADY";
         case EINPROGRESS: return "EINPROGRESS";
+#ifdef ESTALE
         case ESTALE: return "ESTALE";
+#endif
 #ifdef EUCLEAN
         case EUCLEAN: return "EUCLEAN";
 #endif
@@ -765,7 +798,9 @@ int main(int argc, char**argv)
 #ifdef EREMOTEIO
         case EREMOTEIO: return "EREMOTEIO";
 #endif
+#ifdef EDQUOT
         case EDQUOT: return "EDQUOT";
+#endif
 #ifdef ENOMEDIUM
         case ENOMEDIUM: return "ENOMEDIUM";
 #endif
@@ -840,22 +875,16 @@ int main(int argc, char**argv)
         return std::string(message, size);
     }
 
-    /// Eliminates the prefix from str(if present) and returns a copy of the modified string
-    inline
-    std::string eliminatePrefix(const std::string& str, const std::string& prefix)
+    /// Eliminates the prefix from str (if present) and returns a string view.
+    inline std::string_view eliminatePrefix(const std::string_view str,
+                                            const std::string_view prefix)
     {
-        std::string::const_iterator prefix_pos;
-        std::string::const_iterator str_pos;
-
-        std::tie(prefix_pos,str_pos) = std::mismatch(prefix.begin(), prefix.end(), str.begin());
-
-        if (prefix_pos == prefix.end())
+        if (str.starts_with(prefix))
         {
-            // Non-Prefix part
-            return std::string(str_pos, str.end());
+            return str.substr(prefix.size());
         }
 
-        // Return the original string as it is
+        // Return the original string as-is.
         return str;
     }
 
@@ -927,6 +956,11 @@ int main(int argc, char**argv)
         std::memcpy(vector.data() + vlen, data, dataLen);
     }
 
+    inline void vectorAppend(std::vector<char> &vector, const std::string &str)
+    {
+        vectorAppend(vector, str.c_str(), str.length());
+    }
+
     /// Splits a URL into path (with protocol), filename, extension, parameters.
     /// All components are optional, depending on what the URL represents (can be a unix path).
     std::tuple<std::string, std::string, std::string, std::string> splitUrl(const std::string& url);
@@ -937,92 +971,6 @@ int main(int argc, char**argv)
     /// Cleanup a filename replacing anything potentially problematic
     /// either for a URL or for a file path
     std::string cleanupFilename(const std::string &filename);
-
-    /// Return true if the subject matches in given set. It uses regex
-    /// Mainly used to match WOPI hosts patterns
-    bool matchRegex(const std::set<std::string>& set, const std::string& subject);
-
-    /// Return value from key:value pair if the subject matches in given map. It uses regex
-    /// Mainly used to match WOPI hosts patterns
-    std::string getValue(const std::map<std::string, std::string>& map, const std::string& subject);
-
-    std::string getValue(const std::set<std::string>& set, const std::string& subject);
-
-    /// Given one or more patterns to allow, and one or more to deny,
-    /// the match member will return true if, and only if, the subject
-    /// matches the allowed list, but not the deny.
-    /// By default, everything is denied.
-    class RegexListMatcher
-    {
-    public:
-        RegexListMatcher() :
-            _allowByDefault(false)
-        {
-        }
-
-        RegexListMatcher(const bool allowByDefault)
-            : _allowByDefault(allowByDefault)
-        {
-        }
-
-        RegexListMatcher(std::initializer_list<std::string> allowed)
-            : _allowed(allowed)
-            , _allowByDefault(false)
-        {
-        }
-
-        RegexListMatcher(std::initializer_list<std::string> allowed,
-                         std::initializer_list<std::string> denied)
-            : _allowed(allowed)
-            , _denied(denied)
-            , _allowByDefault(false)
-        {
-        }
-
-        RegexListMatcher(const bool allowByDefault,
-                         std::initializer_list<std::string> denied)
-            : _denied(denied)
-            , _allowByDefault(allowByDefault)
-        {
-        }
-
-        void allow(const std::string& pattern) { _allowed.insert(pattern); }
-        void deny(const std::string& pattern)
-        {
-            _allowed.erase(pattern);
-            _denied.insert(pattern);
-        }
-
-        void clear()
-        {
-            _allowed.clear();
-            _denied.clear();
-        }
-
-        bool match(const std::string& subject) const
-        {
-            return (_allowByDefault ||
-                    Util::matchRegex(_allowed, subject)) &&
-                   !Util::matchRegex(_denied, subject);
-        }
-
-        // whether a match exist within both _allowed and _denied
-        bool matchExist(const std::string& subject) const
-        {
-            return (Util::matchRegex(_allowed, subject) ||
-                    Util::matchRegex(_denied, subject));
-        }
-
-        bool empty() const
-        {
-            return _allowed.empty() && _denied.empty();
-        }
-
-    private:
-        std::set<std::string> _allowed;
-        std::set<std::string> _denied;
-        const bool _allowByDefault;
-    };
 
     /// Simple backtrace capture
     /// Use case, e.g. streaming up to 20 frames to log: `LOG_TRC( Util::Backtrace::get(20) );`
@@ -1385,11 +1333,20 @@ int main(int argc, char**argv)
     /// Returns the result of malloc_info, which is an XML string with all the arenas.
     std::string getMallocInfo();
 
+    /// Call malloc_trim or alternative allocator equivalent
+    void trimMalloc();
+
     // std::size isn't available on our android baseline so use this
     // solution as a workaround
     template <typename T, size_t S> char (&n_array_size( T(&)[S] ))[S];
 
 #define N_ELEMENTS(arr)     (sizeof(Util::n_array_size(arr)))
+
+    // Wrap localtime_r() and gmtime_t() which are not portable
+    std::tm *time_t_to_localtime(std::time_t t, std::tm& tm);
+    std::tm *time_t_to_gmtime(std::time_t t, std::tm& tm);
+
+    std::string base64Encode(std::string_view input);
 
 } // end namespace Util
 

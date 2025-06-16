@@ -59,12 +59,12 @@ declare namespace L {
         addEventListener(type: string, fn: (event: any) => void, context?: any): this;
         removeEventListener(type: string, fn?: (event: any) => void, context?: any): this;
         eachLayer(fn: (layer: any) => void, context?: any): this;
-        invalidateSize(options?: boolean | { animate: boolean }): this;
+        invalidateSize(options?: boolean, oldSize?: any): this;
         getBounds(): any; // Replace 'any' with the appropriate type if known
         getZoom(): number;
         getCenter(): [number, number];
         fitBounds(bounds: any, options?: any): this; // Replace 'any' with the appropriate type if known
-        panTo(center: [number, number], options?: any): this;
+        panTo(center: [number, number]): this;
         zoomIn(delta?: number, options?: any): this;
         zoomOut(delta?: number, options?: any): this;
 
@@ -131,6 +131,7 @@ interface Window {
 	// app defined in: js/bundle.js
 	app: {
 		colorPalettes: any; // TODO declare according to Widget.ColorPicker.ts
+		colorNames: any; // TODO declare according to Widget.ColorPicker.ts
 		console: Console;
 		map: any; // TODO should be L.Map
 		// file defined in: src/docstate.js

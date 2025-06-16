@@ -142,8 +142,7 @@ describe(['tagdesktop'], 'Collapsed Annotation Tests', function() {
 		cy.cGet('.cool-annotation-content > div').should('include.text','some reply text');
 	});
 
-	// FIXME: fails on '!'
-	it.skip('Autosave Collapse', function() {
+	it('Autosave Collapse', function() {
 		desktopHelper.insertComment(undefined, false);
 		cy.cGet('#map').focus();
 		helper.typeIntoDocument('{home}');
@@ -189,7 +188,6 @@ describe(['tagdesktop'], 'Comment Scrolling',function() {
 		desktopHelper.insertComment();
 		addSlide(2);
 		desktopHelper.insertComment();
-		helper.waitUntilIdle('.leaflet-control-scroll-up');
 		cy.cGet('.leaflet-control-scroll-up').should('be.visible');
 		cy.cGet('.leaflet-control-scroll-up').click().wait(300);
 		cy.cGet('#SlideStatus').should('contain','Slide 1 of 3');

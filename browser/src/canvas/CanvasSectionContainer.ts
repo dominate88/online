@@ -493,7 +493,14 @@ class CanvasSectionContainer {
 	}
 
 	public isDocumentObjectVisible (section: CanvasSectionObject): boolean {
-		return app.LOUtil._doRectanglesIntersect(app.file.viewedRectangle.pToArray(), [section.position[0], section.position[1], section.size[0], section.size[1]]);
+		return app.isRectangleVisibleInTheDisplayedArea(
+			[
+				section.position[0] * app.pixelsToTwips,
+				section.position[1] * app.pixelsToTwips,
+				section.size[0] * app.pixelsToTwips,
+				section.size[1] * app.pixelsToTwips
+			]
+		);
 	}
 
 	// For window sections, there is a "targetSection" property in CanvasSectionContainer.
@@ -542,7 +549,11 @@ class CanvasSectionContainer {
 			var section: CanvasSectionObject = this.sections[i];
 
 			if (section.documentObject === true) {
-				section.myTopLeft = [this.documentAnchor[0] + section.position[0] - this.documentTopLeft[0], this.documentAnchor[1] + section.position[1] - this.documentTopLeft[1]];
+				section.myTopLeft =[
+					this.documentAnchor[0] + section.position[0] - (app.isXOrdinateInFrozenPane(section.position[0]) ? 0: this.documentTopLeft[0]),
+					this.documentAnchor[1] + section.position[1] - (app.isYOrdinateInFrozenPane(section.position[1]) ? 0: this.documentTopLeft[1])
+				];
+
 				const isVisible = this.isDocumentObjectVisible(section);
 				if (isVisible !== section.isVisible) {
 					section.isVisible = isVisible;
@@ -621,9 +632,18 @@ class CanvasSectionContainer {
 		}
 	}
 
+	private flushLayoutingTasks() {
+		const layoutingService = app.layoutingService;
+		if (layoutingService.hasTasksPending())
+			layoutingService.cancelFrame();
+
+		while (layoutingService.runTheTopTask());
+	}
+
 	private redrawCallback(timestamp: number) {
 		this.drawRequest = null;
 		this.drawSections();
+		this.flushLayoutingTasks();
 	}
 
 	public requestReDraw() {
@@ -665,8 +685,7 @@ class CanvasSectionContainer {
 
 		for (var j: number = 0; j < this.windowSectionList.length; j++) {
 			var windowSection = this.windowSectionList[j];
-			if (windowSection.interactable)
-				windowSection.onCellAddressChanged();
+			windowSection.onCellAddressChanged();
 
 			if (this.lowestPropagatedBoundSection === windowSection.name)
 				propagate = false; // Window sections can not stop the propagation of the event for other window sections.
@@ -674,8 +693,7 @@ class CanvasSectionContainer {
 
 		if (propagate) {
 			for (var i: number = this.sections.length - 1; i > -1; i--) {
-				if (this.sections[i].interactable)
-					this.sections[i].onCellAddressChanged();
+				this.sections[i].onCellAddressChanged();
 			}
 		}
 	}
@@ -1327,10 +1345,10 @@ class CanvasSectionContainer {
 		this.canvas.style.height = cssHeight.toFixed(4) + 'px';
 
 		// Avoid black default background.
+		if (!oldImageData || this.width < newWidth || this.height < newHeight)
+			this.clearCanvas();
 		if (oldImageData)
 			this.context.putImageData(oldImageData, 0, 0);
-		else
-			this.clearCanvas();
 
 		this.clearMousePositions();
 		this.width = this.canvas.width;
@@ -1339,9 +1357,15 @@ class CanvasSectionContainer {
 		this.reNewAllSections(false);
 	}
 
-	findSectionContainingPoint (point: Array<number>): any {
+	findSectionContainingPoint (point: Array<number>, interactable = true): any {
 		for (var i: number = this.sections.length - 1; i > -1; i--) { // Search from top to bottom. Top section will be sent as target section.
-			if (this.sections[i].isLocated && !this.sections[i].windowSection && this.sections[i].showSection && (!this.sections[i].documentObject || this.sections[i].isVisible) && this.doesSectionIncludePoint(this.sections[i], point))
+			if (
+				this.sections[i].isLocated && !this.sections[i].windowSection &&
+				this.sections[i].showSection &&
+				(!this.sections[i].documentObject || this.sections[i].isVisible) &&
+				this.doesSectionIncludePoint(this.sections[i], point)
+				&& (interactable ? this.sections[i].interactable : true)
+			)
 				return this.sections[i];
 		}
 
@@ -1628,7 +1652,10 @@ class CanvasSectionContainer {
 			if (section.documentObject === true) { // "Document anchor" section should be processed before "document object" sections.
 				if (section.size && section.position) {
 					section.isLocated = true;
-					section.myTopLeft = [this.documentAnchor[0] + section.position[0] - this.documentTopLeft[0], this.documentAnchor[1] + section.position[1] - this.documentTopLeft[1]];
+					section.myTopLeft = [
+						this.documentAnchor[0] + section.position[0] - (app.isXOrdinateInFrozenPane(section.position[0]) ? 0 : this.documentTopLeft[0]),
+						this.documentAnchor[1] + section.position[1] - (app.isYOrdinateInFrozenPane(section.position[1]) ? 0 : this.documentTopLeft[1])
+					];
 				}
 			}
 			else if (section.boundToSection) { // Don't set boundToSection property for "window sections".
@@ -1882,7 +1909,9 @@ class CanvasSectionContainer {
 
 			x = Math.round(x);
 			y = Math.round(y);
-			let sectionXcoord = x - this.containerObject.getDocumentTopLeft()[0];
+			let sectionXcoord = x;
+			const positionAddition = this.containerObject.getDocumentTopLeft();
+
 			if (this.isCalcRTL()) {
 				// the document coordinates are not always in sync(fixing that is non-trivial!), so use the latest from map.
 				const docLayer = this.sectionProperties.docLayer;
@@ -1890,9 +1919,16 @@ class CanvasSectionContainer {
 				sectionXcoord = docSize.x - sectionXcoord - this.size[0];
 			}
 
-			this.myTopLeft[0] = this.containerObject.getDocumentAnchor()[0] + sectionXcoord;
-			this.myTopLeft[1] = this.containerObject.getDocumentAnchor()[1] + y - this.containerObject.getDocumentTopLeft()[1];
-			this.position[0] = x;
+			if (app.isXOrdinateInFrozenPane(sectionXcoord))
+				positionAddition[0] = 0;
+
+			if (app.isYOrdinateInFrozenPane(y))
+				positionAddition[1] = 0;
+
+			this.myTopLeft[0] = this.containerObject.getDocumentAnchor()[0] + sectionXcoord - positionAddition[0];
+			this.myTopLeft[1] = this.containerObject.getDocumentAnchor()[1] + y - positionAddition[1];
+
+			this.position[0] = sectionXcoord;
 			this.position[1] = y;
 			const isVisible = this.containerObject.isDocumentObjectVisible(this);
 			if (isVisible !== this.isVisible) {
@@ -2002,7 +2038,7 @@ class CanvasSectionContainer {
 
 	private animate (timeStamp: number) {
 		if (this.lastFrameStamp > 0)
-			this.elapsedTime += timeStamp - this.lastFrameStamp;
+			this.elapsedTime += Math.max(0, timeStamp - this.lastFrameStamp);
 
 		this.lastFrameStamp = timeStamp;
 
@@ -2077,7 +2113,7 @@ class CanvasSectionContainer {
 			if (options.defer)
 				requestAnimationFrame(this.animate.bind(this));
 			else
-				this.animate(performance.now());
+				this.animate(document.timeline.currentTime as number);
 			return true;
 		}
 		else {

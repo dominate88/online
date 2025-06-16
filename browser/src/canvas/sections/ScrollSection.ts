@@ -25,6 +25,9 @@ export class ScrollSection extends CanvasSectionObject {
 	static readonly scrollAnimationMaxDelta: number = 75;
 	static readonly scrollDirectTimeoutMs: number = 100;
 
+	// The number of lines a scroll-wheel tick should travel
+	static readonly scrollWheelDelta: number = 20;
+
 	name: string = L.CSections.Scroll.name;
 	processingOrder: number = L.CSections.Scroll.processingOrder
 	drawingOrder: number = L.CSections.Scroll.drawingOrder;
@@ -41,16 +44,13 @@ export class ScrollSection extends CanvasSectionObject {
 	constructor (isRTL?: () => boolean) {
 		super();
 
-
 		this.map = L.Map.THIS;
 
 		this.isRTL = isRTL ?? (() => false);
 
-		this.map.on('scrollto', this.onScrollTo, this);
 		this.map.on('scrollby', this.onScrollBy, this);
 		this.map.on('scrollvelocity', this.onScrollVelocity, this);
 		this.map.on('handleautoscroll', this.onHandleAutoScroll, this);
-		this.map.on('updatescrolloffset', this.onUpdateScrollOffset, this);
 	}
 
 	public onInitialize (): void {
@@ -108,7 +108,9 @@ export class ScrollSection extends CanvasSectionObject {
 		this.sectionProperties.animatingScroll = false;
 
 		this.sectionProperties.animateWheelScroll = (<any>window).mode.isDesktop();
+		this.sectionProperties.lastElapsedTime = 0;
 		this.sectionProperties.scrollAnimationDelta = [0, 0];
+		this.sectionProperties.scrollAnimationAcc = [0, 0];
 		this.sectionProperties.scrollAnimationVelocity = [0, 0];
 		this.sectionProperties.scrollAnimationDisableTimeout = null;
 		this.sectionProperties.scrollWheelDelta = [0, 0];	// Used for non-animated scrolling
@@ -120,6 +122,13 @@ export class ScrollSection extends CanvasSectionObject {
 		// Step by step scrolling interval in ms
 		this.sectionProperties.stepDuration = 50;
 		this.sectionProperties.quickScrollHorizontalTimer = null;
+
+		// Chrome's mouse-wheel events are extremely inconsistent between platforms and they don't
+		// use the deltaMode property, so we need to apply heuristics to determine when a wheel event
+		// comes from a mouse-wheel or a touchpad.
+		this.sectionProperties.scrollQuirks = true;
+
+		this.sectionProperties.moveMapBy = null; // Move map this amount [x, y] (CSS pixels) when updating the DOM.
 	}
 
 	public completePendingScroll(): void {
@@ -137,10 +146,21 @@ export class ScrollSection extends CanvasSectionObject {
 			return;
 		}
 		// Triggered by the document (e.g. search result out of the viewing area).
-		if (this.map.scrollTop && this.map.scrollLeft) {
-			this.map.scrollTop(e.y, {});
-			this.map.scrollLeft(e.x, {});
+		if (this.map.panBy) {
+			this.moveMapBy(e.x - app.file.viewedRectangle.cX1, e.y - app.file.viewedRectangle.cY1, true);
 		}
+	}
+
+	public moveMapBy(cX: number, cY: number, reset: boolean = false): void {
+		if (this.sectionProperties.moveMapBy !== null) {
+			this.sectionProperties.moveMapBy[0] = reset === false ? this.sectionProperties.moveMapBy[0] + cX : cX;
+			this.sectionProperties.moveMapBy[1] = reset === false ? this.sectionProperties.moveMapBy[1] + cY : cY;
+		}
+		else {
+			this.sectionProperties.moveMapBy = [cX, cY];
+		}
+
+		this.containerObject.requestReDraw();
 	}
 
 	// eslint-disable-next-line @typescript-eslint/explicit-module-boundary-types
@@ -169,7 +189,8 @@ export class ScrollSection extends CanvasSectionObject {
 			if (docTopLef[0] + diff < 0) {
 				e.x = Math.round(-1 * docTopLef[0] / app.dpiScale);
 			}
-			this.map.panBy(new L.Point(e.x, e.y), {animate: false});
+
+			this.moveMapBy(e.x, e.y);
 		}
 	}
 
@@ -360,7 +381,7 @@ export class ScrollSection extends CanvasSectionObject {
 	public onUpdateScrollOffset (): void {
 		if (this.map._docLayer._docType === 'spreadsheet') {
 			this.map._docLayer.refreshViewData();
-			this.map._docLayer.updateScrollLimit();
+			this.map._docLayer._restrictDocumentSize();
 		}
 	}
 
@@ -535,30 +556,46 @@ export class ScrollSection extends CanvasSectionObject {
 		if ((this.sectionProperties.drawHorizontalScrollBar || this.sectionProperties.animatingHorizontalScrollBar)) {
 			this.drawHorizontalScrollBar();
 		}
+
+		if (this.sectionProperties.moveMapBy !== null) {
+			this.map.panBy(new L.Point(this.sectionProperties.moveMapBy[0], this.sectionProperties.moveMapBy[1]));
+			this.sectionProperties.moveMapBy = null;
+			this.onUpdateScrollOffset();
+
+			if (app && app.file.fileBasedView === true)
+				app.map._docLayer._checkSelectedPart();
+		}
 	}
 
 	public onAnimate(frameCount: number, elapsedTime: number): void {
 		if (this.sectionProperties.animatingScroll) {
 			const lineHeight = this.containerObject.getScrollLineHeight();
-			const accel = lineHeight * ScrollSection.scrollAnimationAcceleration;
-			const maxDelta = lineHeight * ScrollSection.scrollAnimationMaxVelocity;
+			// Smoothness will be affected by Firefox bug #1967935
+			const timeDelta = (elapsedTime - this.sectionProperties.lastElapsedTime) / (1000/60);
+			const accel = lineHeight * ScrollSection.scrollAnimationAcceleration * timeDelta * app.dpiScale;
+			const maxVelocity = lineHeight * ScrollSection.scrollAnimationMaxVelocity * timeDelta * app.dpiScale;
+			const maxDelta = lineHeight * ScrollSection.scrollAnimationMaxDelta * app.dpiScale;
 
 			// Calculate horizontal and vertical scroll deltas for this animation step
 			const deltas = [0, 0];
 			for (let i = 0; i < 2; ++i) {
-				const sign = this.sectionProperties.scrollAnimationDelta[i] > 0 ? 1 : -1;
+				this.sectionProperties.scrollAnimationAcc[i] += this.sectionProperties.scrollAnimationDelta[i];
+				this.sectionProperties.scrollAnimationDelta[i] = 0;
 
+				// Don't let the accumulated delta get too big, or the user will be able to
+				// accumulate a long scrolling animation and it'd feel weird.
+				const sign = this.sectionProperties.scrollAnimationAcc[i] > 0 ? 1 : -1;
+				if (Math.abs(this.sectionProperties.scrollAnimationAcc[i]) > maxDelta)
+					this.sectionProperties.scrollAnimationAcc[i] = sign * maxDelta;
 				this.sectionProperties.scrollAnimationVelocity[i] += accel * sign;
-				if (Math.abs(this.sectionProperties.scrollAnimationVelocity[i]) > maxDelta)
-					this.sectionProperties.scrollAnimationVelocity[i] = sign * maxDelta;
 
-				deltas[i] = this.sectionProperties.scrollAnimationVelocity[i];
-				if (Math.abs(deltas[i]) >= Math.abs(this.sectionProperties.scrollAnimationDelta[i])) {
-					deltas[i] = this.sectionProperties.scrollAnimationDelta[i];
-					this.sectionProperties.scrollAnimationDelta[i] = 0;
+				deltas[i] = Math.round(Math.min(Math.abs(this.sectionProperties.scrollAnimationVelocity[i]), maxVelocity) * sign);
+				if (Math.abs(deltas[i]) >= Math.abs(this.sectionProperties.scrollAnimationAcc[i])) {
+					deltas[i] = this.sectionProperties.scrollAnimationAcc[i];
+					this.sectionProperties.scrollAnimationAcc[i] = 0;
 					this.sectionProperties.scrollAnimationVelocity[i] = 0;
 				} else
-					this.sectionProperties.scrollAnimationDelta[i] -= deltas[i];
+					this.sectionProperties.scrollAnimationAcc[i] -= deltas[i];
 			}
 
 			// Perform scrolling, if necessary
@@ -579,12 +616,14 @@ export class ScrollSection extends CanvasSectionObject {
 			}
 		}
 
+		this.sectionProperties.lastElapsedTime = elapsedTime;
+
 		const animatingScrollbar =
 			(this.sectionProperties.animatingHorizontalScrollBar
 			|| this.sectionProperties.animatingVerticalScrollBar) &&
 			elapsedTime && (elapsedTime < this.sectionProperties.fadeOutDuration);
 		const animatingScroll = this.sectionProperties.animatingScroll
-			&& this.sectionProperties.scrollAnimationDelta.reduce((a: number, x: number) => a + x, 0) !== 0;
+			&& this.sectionProperties.scrollAnimationAcc.reduce((a: number, x: number) => a + x, 0) !== 0;
 		if (!animatingScrollbar && !animatingScroll) this.containerObject.stopAnimating();
 	}
 
@@ -592,7 +631,7 @@ export class ScrollSection extends CanvasSectionObject {
 		this.sectionProperties.animatingVerticalScrollBar = false;
 		this.sectionProperties.animatingHorizontalScrollBar = false;
 		this.sectionProperties.animatingScroll = false;
-		this.sectionProperties.scrollAnimationDelta = [0, 0];
+		this.sectionProperties.scrollAnimationAcc = [0, 0];
 		this.sectionProperties.scrollAnimationVelocity = [0, 0];
 	}
 
@@ -768,8 +807,7 @@ export class ScrollSection extends CanvasSectionObject {
 				return false;
 		}
 
-		this.map.scroll(0, offset / app.dpiScale, {});
-		this.onUpdateScrollOffset();
+		this.moveMapBy(0, offset / app.dpiScale);
 
 		if (app.file.fileBasedView) this.map._docLayer._checkSelectedPart();
 
@@ -803,8 +841,7 @@ export class ScrollSection extends CanvasSectionObject {
 				return false;
 		}
 
-		this.map.scroll(offset / app.dpiScale, 0, {});
-		this.onUpdateScrollOffset();
+		this.moveMapBy(offset / app.dpiScale, 0);
 
 		if (!this.sectionProperties.drawHorizontalScrollBar) {
 			if (this.isAnimating) {
@@ -1120,33 +1157,32 @@ export class ScrollSection extends CanvasSectionObject {
 	}
 
 	private animateScroll(delta: [number, number]): void {
-		const maxDelta = ScrollSection.scrollAnimationMaxDelta * this.containerObject.getScrollLineHeight();
+		const lineHeight = this.containerObject.getScrollLineHeight();
+
 		for (let i = 0; i < 2; ++i) {
-			if ((delta[i] > 0) !== (this.sectionProperties.scrollAnimationDelta[i] > 0)) {
+			if (Math.abs(delta[i]) === 0) continue;
+
+			if ((delta[i] > 0) !== (this.sectionProperties.scrollAnimationAcc[i] > 0)) {
 				// Stop animation on scroll change direction
 				this.sectionProperties.scrollAnimationVelocity[i] = 0;
-				this.sectionProperties.scrollAnimationDelta[i] = 0;
+				this.sectionProperties.scrollAnimationAcc[i] = 0;
 			}
 
-			this.sectionProperties.scrollAnimationDelta[i] += delta[i];
-
-			// Don't let the delta get too big, or the user will be able to
-			// accumulate a long scrolling animation and it'd feel weird.
-			if (Math.abs(this.sectionProperties.scrollAnimationDelta[i]) > maxDelta) {
-				this.sectionProperties.scrollAnimationDelta[i] = delta[i] > 0 ?
-					maxDelta : -maxDelta;
-			}
+			const sign = delta[i] > 0 ? 1 : -1;
+			this.sectionProperties.scrollAnimationDelta[i] =
+				lineHeight * ScrollSection.scrollWheelDelta * sign * app.dpiScale;
 		}
 
 		if (!this.sectionProperties.animatingScroll) {
 			this.sectionProperties.animatingScroll = true;
+			this.sectionProperties.lastElapsedTime = 0;
 			// We're about to start a duration-less animation, so we need to
 			// ensure the animation is reset.
-			if (!this.startAnimating({})) this.resetAnimation();
+			if (!this.startAnimating({ 'defer': true })) this.resetAnimation();
 		}
 	}
 
-	public onMouseWheel (point: Array<number>, delta: Array<number>, e: MouseEvent): void {
+	public onMouseWheel (point: Array<number>, delta: Array<number>, e: WheelEvent): void {
 		if (e.ctrlKey) return;
 
 		this.map.fire('closepopups'); // close all popups when scrolling
@@ -1160,19 +1196,53 @@ export class ScrollSection extends CanvasSectionObject {
 		} else
 			hscroll = delta[0];
 
-		// We don't want to animate in the case of touchpad events. If the
-		// incoming delta has a fractional component, we stop animating. This
-		// is only true in the case of trackpad events.
-		// FIXME: It would be good to properly confirm this across different
-		// browsers, OS's and window managers/compositors.
-		const shouldAnimate =
-			this.sectionProperties.animateWheelScroll
-			&& !this.sectionProperties.scrollAnimationDisableTimeout
-			&& Math.max(Math.abs(hscroll), Math.abs(vscroll)) % 1 === 0;
+		let shouldAnimate = this.sectionProperties.animateWheelScroll
+			&& !this.sectionProperties.scrollAnimationDisableTimeout;
+
+		// We don't want to animate in the case of touchpad events. There is no
+		// completely browser/OS-agnostic way of determining if a wheel event was
+		// generated by a touchpad or a mouse-wheel.
+		if (shouldAnimate) {
+			if (this.sectionProperties.scrollQuirks) {
+				// Firefox sends line scroll events for the mouse-wheel and pixel events
+				// for the touch-pad. If we receive a non-pixel mousewheel scroll, we know
+				// that we can rely on this and disable other heuristics that may cause
+				// false-positives.
+				if (e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL)
+					this.sectionProperties.scrollQuirks = false;
+				else if (e.deltaX !== 0 && e.deltaY !== 0) {
+					// It's not a mouse-wheel if both components are non-zero. I suppose it's
+					// theoretically possible to scroll in both directions at once with a wheel,
+					// but very difficult.
+					shouldAnimate = false;
+				} else {
+					const nowIsAccurate = performance.now() % 1 !== 0;
+					const hasFractionalComponent = (e.deltaX % 1 !== 0) || (e.deltaY % 1 !== 0);
+					const deltaMaybeDiscrete = Math.abs((e as any).wheelDelta) % 60 === 0;
+
+					if (hasFractionalComponent && (!nowIsAccurate || !deltaMaybeDiscrete)) {
+						// Firefox touchpad deltas always seem to have a fractional
+						// component on Linux, but this is also true of wheel events for
+						// Chrome on Mac.
+						// To distinguish Firefox from Chrome, we can use the fact that
+						// Firefox performance.now() is rounded to a whole number and that
+						// the wheelDelta on Mac will be discrete.
+						shouldAnimate = false;
+					} else if (nowIsAccurate && !deltaMaybeDiscrete) {
+						// In Chrome, performance.now can (and usually does) have a
+						// fractional component. We can use this to single it out, then
+						// check if the delta is discrete. This would indicate the event
+						// was generated by a mouse-wheel.
+						shouldAnimate = false;
+					}
+				}
+			} else
+				shouldAnimate = e.deltaMode !== WheelEvent.DOM_DELTA_PIXEL;
+		}
 
 		hscroll *= app.dpiScale;
 		vscroll *= app.dpiScale;
-		
+
 		if (shouldAnimate)
 			this.animateScroll([hscroll, vscroll]);
 		else {

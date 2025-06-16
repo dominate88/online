@@ -50,30 +50,19 @@ describe(['tagdesktop'], 'Image Operation Tests', function() {
 		//when Keep ratio is unchecked
 		helper.assertImageSize(248, 63);
 
-		helper.waitUntilIdle('.ui-expander-label');
-
 		cy.cGet().contains('.ui-expander-label', 'Position and Size')
 			.click();
 
-		helper.waitUntilIdle('#selectwidth input');
+		cy.cGet('#selectwidth input').type('{selectAll}{backspace}3{enter}');
 
-		cy.cGet('#selectwidth input').clear({force:true})
-			.type('3{enter}', {force:true});
-
-		helper.waitUntilIdle('#selectheight input');
-
-		cy.cGet('#selectheight input').clear({force:true})
-			.type('2{enter}', {force:true});
+		cy.cGet('#selectheight input').type('{selectAll}{backspace}2{enter}');
 
 		helper.assertImageSize(139, 93);
 
 		//Keep ratio checked
 		cy.cGet('#ratio input').check();
 
-		helper.waitUntilIdle('#selectheight input');
-
-		cy.cGet('#selectheight input').clear({force:true})
-			.type('5{enter}', {force:true});
+		cy.cGet('#selectheight input').type('{selectAll}{backspace}5{enter}');
 
 		helper.assertImageSize(347, 232);
 	});

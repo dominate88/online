@@ -257,7 +257,7 @@ class Dispatcher {
 			if (app.map.isEditMode()) $('#toolbar-down').show();
 			/** show edit button if only we are able to edit but in readonly mode */
 			if (!app.isReadOnly() && app.map.isReadOnlyMode())
-				$('#mobile-edit-button').show();
+				$('#mobile-edit-button').css('display', 'flex');
 		};
 
 		this.actionsMap['prev'] = () => {
@@ -289,6 +289,9 @@ class Dispatcher {
 		};
 
 		this.actionsMap['togglea11ystate'] = () => {
+			if (app.map._lockAccessibilityOn) {
+				return;
+			}
 			var prevAccessibilityState =
 				window.prefs.getBoolean('accessibilityState');
 			app.map.setAccessibilityState(!prevAccessibilityState);
@@ -460,7 +463,11 @@ class Dispatcher {
 		this.actionsMap['columnrowhighlight'] = function () {
 			var newState = !app.map.uiManager.getHighlightMode();
 			app.map.uiManager.setHighlightMode(newState);
-			app.map._docLayer.updateHighlight();
+
+			if (newState) FocusCellSection.showFocusCellSection();
+			else FocusCellSection.hideFocusCellSection();
+
+			app.sectionContainer.requestReDraw();
 		};
 	}
 
@@ -525,19 +532,16 @@ class Dispatcher {
 
 		this.actionsMap['previouspart'] = function () {
 			app.map._docLayer._preview._scrollViewByDirection('prev');
-			if (app.file.fileBasedView) app.map._docLayer._checkSelectedPart();
 		};
 
 		this.actionsMap['nextpart'] = function () {
 			app.map._docLayer._preview._scrollViewByDirection('next');
-			if (app.file.fileBasedView) app.map._docLayer._checkSelectedPart();
 		};
 
 		this.actionsMap['lastpart'] = function () {
 			if (app && app.file.fileBasedView === true) {
 				const partToSelect = app.map._docLayer._parts - 1;
 				app.map._docLayer._preview._scrollViewToPartPosition(partToSelect);
-				app.map._docLayer._checkSelectedPart();
 			}
 		};
 
@@ -545,7 +549,6 @@ class Dispatcher {
 			if (app && app.file.fileBasedView === true) {
 				const partToSelect = 0;
 				app.map._docLayer._preview._scrollViewToPartPosition(partToSelect);
-				app.map._docLayer._checkSelectedPart();
 			}
 		};
 

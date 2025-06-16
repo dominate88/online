@@ -44,8 +44,8 @@ window.app = {
 	DebugManager: null, // Attach DebugManager class.
 	dispatcher: null, // A Dispatcher class instance is assigned to this.
 	layoutingService: null, // instance of a service processing squashed DOM updates
-	twipsToPixels: 0, // Twips to pixels multiplier.
-	pixelsToTwips: 0, // Pixels to twips multiplier.
+	twipsToPixels: 0, // Twips to pixels multiplier, according to the current zoom level.
+	pixelsToTwips: 0, // Pixels to twips multiplier, according to the current zoom level.
 	accessibilityState: false, // If accessibility was enabled by user
 	UI: {
 		language: {
@@ -95,6 +95,7 @@ window.app = {
 	// Below 2 are related to document. I guess we can move these into "file" property.
 	languages: [], // all available languages, fetched from core
 	favouriteLanguages: ['de-DE', 'en-US', 'en-GB', 'es-ES', 'fr-FR', 'it', 'nl-NL', 'pt-BR', 'pt-PT', 'ru'],
+	colorNames: null,
 	colorPalettes: {
 		'StandardColors': { name: _('Standard'), colors: [
 			[{Value: '000000'}, {Value: '111111'}, {Value: '1C1C1C'}, {Value: '333333'}, {Value: '666666'}, {Value: '808080'}, {Value: '999999'}, {Value: 'B2B2B2'}, {Value: 'CCCCCC'}, {Value: 'DDDDDD'}, {Value: 'EEEEEE'}, {Value: 'FFFFFF'}],
@@ -117,6 +118,8 @@ window.app = {
 	serverAudit: null, // contains list of warnings / errors detected on the server instance
 
 	events: null, // See app/DocEvents.ts for details.
+
+	showNavigator: false, // ShowNavigator class instance is assigned to this.
 };
 
 var activateValidation = false;

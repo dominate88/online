@@ -80,7 +80,7 @@
  * Note that the options are still encoded and need decoding separately.
  *
  * Due to the multi-layer nature of the URI, it raises many difficulties, not least
- * the fact that it has multiple query parameters ('?' sections). It also has foreslash
+ * the fact that it has multiple query parameters ('?' sections). It also has slash
  * delimiters after query parameters.
  *
  * The different sections are henceforth given names to help both in documenting and
@@ -119,7 +119,6 @@ private:
     std::string _uriString;
     std::string _proxyPrefix;
     std::string _hostUntrusted;
-    std::string _documentURI;
     bool _isGet : 1;
     bool _isHead : 1;
     bool _isProxy : 1;
@@ -260,7 +259,7 @@ public:
         return (_isGet || _isHead) && _uriString == path;
     }
 
-    bool equals(std::size_t index, const char* string) const
+    bool equals(std::size_t index, const std::string_view string) const
     {
         return _pathSegs.equals(index, string);
     }
@@ -290,10 +289,10 @@ public:
         return it != _fields.end() ? it->second : std::string();
     }
 
-    bool equals(const Field field, const char* string) const
+    bool equals(const Field field, const std::string_view string) const
     {
         const auto it = _fields.find(field);
-        return it != _fields.end() ? it->second == string : (string == nullptr || *string == '\0');
+        return it != _fields.end() ? it->second == string : string.empty();
     }
 
     std::string toString() const

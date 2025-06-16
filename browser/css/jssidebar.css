@@ -61,19 +61,24 @@ img.sidebar.ui-image {
 	font-size: var(--header-font-size);
 	line-height: var(--header-height);
 	padding-inline: 8px;
+	flex: 1;
+	display: flex;
 }
 
 .ui-expander-icon-right .sidebar.unotoolbutton {
 	margin: 0px !important;
 }
 
-.ui-expander.jsdialog.sidebar .ui-expander-icon-right,
-.ui-expander.jsdialog.sidebar .ui-expander-icon-right * {
-	display: block;
+.ui-expander.jsdialog.sidebar {
+	width: 100%;
+}
+
+.ui-expander-icon-right.jsdialog.sidebar .sidebar.unotoolbutton button,
+.ui-expander-icon-right.jsdialog.sidebar .sidebar.unotoolbutton button img {
 	width: 10px;
 	height: 10px;
-	margin-inline-end: 10px;
 	padding: 0;
+	margin: 0;
 }
 
 .ui-expander.jsdialog.sidebar .ui-expander-icon-right:hover img {
@@ -280,6 +285,17 @@ button#button2.ui-pushbutton.jsdialog.sidebar {
 	display: none;
 }
 
+.unoChartColorPalette.unotoolbutton > .unobutton {
+	width: calc(3*var(--btn-size));
+	height: calc(2*var(--btn-size));
+}
+
+.unoChartColorPalette.unotoolbutton > .unobutton img {
+	width: calc(3*var(--btn-img-size));
+	height: calc(2*var(--btn-img-size));
+}
+
+
 /* not available commands*/
 
 .sidebar #orientationcontrol,
@@ -294,6 +310,11 @@ button#button2.ui-pushbutton.jsdialog.sidebar {
 	height: 0;
 }
 
+/* https://github.com/CollaboraOnline/online/issues/11868 */
+/* To do: to solve it on core side */
+#box4 > [id^='hyphenation'] {
+	display: none !important;
+}
 
 /* Navigator */
 
@@ -339,11 +360,11 @@ button#button2.ui-pushbutton.jsdialog.sidebar {
 }
 #NavigatorPanel .ui-treeview-cell-text {
 	/* good to move this into css var*/
-	font-size: 14px;
+	font-size: 0.875rem;
 	white-space: break-spaces;
 }
 
-#StyleListPanelPanelExpander .ui-treeview-cell-text {
+.StyleListPanel #TemplatePanel .ui-treeview-cell-text {
 	white-space: break-spaces;
 }
 
@@ -429,6 +450,10 @@ span.jsdialog.sidebar.ui-treeview-notexpandable {
 	box-sizing: border-box;
 }
 
+.navigator-container .ui-treeview-placeholder {
+	padding: 16px;
+}
+
 .navigation-title {
 	font-weight: bold;
 }
@@ -466,7 +491,7 @@ span.jsdialog.sidebar.ui-treeview-notexpandable {
 	flex: 1;
 	padding: 10px;
 	cursor: pointer;
-	font-size: 14px;
+	font-size: 0.875rem;
 	border-bottom: none;
 	color: var(--color-main-text);
 	transition: background-color 0.3s, border-color 0.3s;
@@ -517,26 +542,26 @@ span.jsdialog.sidebar.ui-treeview-notexpandable {
 	background-color: #0056b3;
 }
 /* Styles deck */
-#StyleListPanelPanelExpander [id='2'] button { background: transparent url('images/lc_parastyle.svg') no-repeat center; }
-#StyleListPanelPanelExpander [id='1'] button { background: transparent url('images/lc_charstyle.svg') no-repeat center; }
-#StyleListPanelPanelExpander [id='3'] button { background: transparent url('images/lc_framestyle.svg') no-repeat center; }
-#StyleListPanelPanelExpander [id='4'] button { background: transparent url('images/lc_pagestyle.svg') no-repeat center; }
-#StyleListPanelPanelExpander [id='5'] button { background: transparent url('images/lc_liststyle.svg') no-repeat center; }
-#StyleListPanelPanelExpander [id='6'] button { background: transparent url('images/lc_tablestyle.svg') no-repeat center; }
+.StyleListPanel #TemplatePanel [id='2'] button { background: transparent url('images/lc_parastyle.svg') no-repeat center; }
+.StyleListPanel #TemplatePanel [id='1'] button { background: transparent url('images/lc_charstyle.svg') no-repeat center; }
+.StyleListPanel #TemplatePanel [id='3'] button { background: transparent url('images/lc_framestyle.svg') no-repeat center; }
+.StyleListPanel #TemplatePanel [id='4'] button { background: transparent url('images/lc_pagestyle.svg') no-repeat center; }
+.StyleListPanel #TemplatePanel [id='5'] button { background: transparent url('images/lc_liststyle.svg') no-repeat center; }
+.StyleListPanel #TemplatePanel [id='6'] button { background: transparent url('images/lc_tablestyle.svg') no-repeat center; }
 
 
-[data-theme='dark'] #StyleListPanelPanelExpander [id='1'] button { background: transparent url('images/dark/lc_charstyle.svg') no-repeat center; }
-[data-theme='dark'] #StyleListPanelPanelExpander [id='5'] button { background: transparent url('images/dark/lc_liststyle.svg') no-repeat center; }
-[data-theme='dark'] #StyleListPanelPanelExpander [id='2'] button { background: transparent url('images/dark/lc_parastyle.svg') no-repeat center; }
-[data-theme='dark'] #StyleListPanelPanelExpander [id='4'] button { background: transparent url('images/dark/lc_pagestyle.svg') no-repeat center; }
-[data-theme='dark'] #StyleListPanelPanelExpander [id='3'] button { background: transparent url('images/dark/lc_framestyle.svg') no-repeat center; }
-[data-theme='dark'] #StyleListPanelPanelExpander [id='6'] button { background: transparent url('images/dark/lc_tablestyle.svg') no-repeat center; }
+[data-theme='dark'] .StyleListPanel #TemplatePanel [id='1'] button { background: transparent url('images/dark/lc_charstyle.svg') no-repeat center; }
+[data-theme='dark'] .StyleListPanel #TemplatePanel [id='5'] button { background: transparent url('images/dark/lc_liststyle.svg') no-repeat center; }
+[data-theme='dark'] .StyleListPanel #TemplatePanel [id='2'] button { background: transparent url('images/dark/lc_parastyle.svg') no-repeat center; }
+[data-theme='dark'] .StyleListPanel #TemplatePanel [id='4'] button { background: transparent url('images/dark/lc_pagestyle.svg') no-repeat center; }
+[data-theme='dark'] .StyleListPanel #TemplatePanel [id='3'] button { background: transparent url('images/dark/lc_framestyle.svg') no-repeat center; }
+[data-theme='dark'] .StyleListPanel #TemplatePanel [id='6'] button { background: transparent url('images/dark/lc_tablestyle.svg') no-repeat center; }
 
-#StyleListPanelPanelExpander #left.toolbox button {
+.StyleListPanel #left.toolbox button {
 	background-size: cover;
 }
 
-#StyleListPanelPanelExpander #left.toolbox img {
+.StyleListPanel #left.toolbox img {
 	visibility: hidden;
 }
 
@@ -547,20 +572,22 @@ span.jsdialog.sidebar.ui-treeview-notexpandable {
 /* required to dynamically resize treeviews or lists inside sidebar */
 .sidebar-container, .navigator-container
 .sidebar-container > .root-container.jsdialog.sidebar,.navigator-container > .root-container.jsdialog.sidebar > .root-container.jsdialog.sidebar
-.sidebar-container > .root-container.jsdialog.sidebar > .vertical.jsdialog.sidebar , .navigator-container > .root-container.jsdialog.sidebar > .vertical.jsdialog.sidebar{
+.sidebar-container > .root-container.jsdialog.sidebar > .vertical.jsdialog.sidebar , .navigator-container > .root-container.jsdialog.sidebar > .vertical.jsdialog.sidebar {
 	height: 100%;
 }
 
 #StyleListDeck,
 #StyleListDeck .root-container.jsdialog.sidebar,
 #StyleListDeck .vertical.jsdialog.sidebar,
-#StyleListPanelPanelExpander,
-#StyleListPanelPanelExpander #content,
-#StyleListPanelPanelExpander #TemplatePanel {
+.StyleListPanel,
+.StyleListPanel #content,
+.StyleListPanel #TemplatePanel {
 	height: 100%;
+	display: flex;
+	flex-direction: column;
 }
 
-#StyleListPanelPanelExpander .ui-expander-content.jsdialog.sidebar.expanded {
+.StyleListPanel .ui-expander-content.jsdialog.sidebar.expanded {
 	height: calc(100% - 45px);
 }
 
@@ -580,6 +607,7 @@ span.jsdialog.sidebar.ui-treeview-notexpandable {
 #TemplatePanel .sidebar .ui-content.unobutton {
 	width: var(--btn-size-m);
 	height: var(--btn-size-m);
+	background-color: transparent !important;
 }
 
 #TemplatePanel {

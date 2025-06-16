@@ -57,6 +57,14 @@ QUIET_JSCPCD = $(QUIET_JSCPCD_$(V))
 QUIET_JSCPCD_ = $(QUIET_JSCPCD_$(AM_DEFAULT_VERBOSITY))
 QUIET_JSCPCD_0 = @echo "  JSCPCD  " $@;
 
+QUIET_STYLELINT = $(QUIET_STYLELINT_$(V))
+QUIET_STYLELINT_ = $(QUIET_STYLELINT_$(AM_DEFAULT_VERBOSITY))
+QUIET_STYLELINT_0 = @echo "  STYLELINT" $@;
+
+QUIET_UNOCOMMANDS = $(QUIET_UNOCOMMANDS_$(V))
+QUIET_UNOCOMMANDS_ = $(QUIET_UNOCOMMANDS_$(AM_DEFAULT_VERBOSITY))
+QUIET_UNOCOMMANDS_0 = @echo "  UNOCOMMANDS " $@;
+
 MOCHA_DIR = $(srcdir)/mocha_tests
 MOCHA_JS_DIR = $(MOCHA_DIR)/workdir
 MOCHA_TS_FILES = $(wildcard $(MOCHA_DIR)/*.ts)
@@ -292,11 +300,13 @@ COOL_JS_LST =\
 	src/canvas/sections/CommentListSection.ts \
 	src/canvas/sections/CalcGridSection.ts \
 	src/canvas/sections/SplitSection.ts \
+	src/canvas/sections/SplitterLinesSection.ts \
 	src/canvas/sections/PixelGridSection.ts \
 	src/canvas/sections/DebugOverlaySection.ts \
 	src/canvas/sections/PreloadMapSection.ts \
 	src/canvas/sections/TilesSection.ts \
 	src/canvas/sections/AutoFillMarkerSection.ts \
+	src/canvas/sections/FocusCellSection.ts \
 	src/canvas/sections/URLPopUpSection.ts \
 	src/canvas/sections/InvalidationRectangleSection.ts \
 	src/canvas/sections/ShapeHandlesSection.ts \
@@ -322,7 +332,6 @@ COOL_JS_LST =\
 	src/layer/vector/CPolyUtil.ts \
 	src/layer/vector/CPolygon.ts \
 	src/layer/vector/CRectangle.ts \
-	src/layer/vector/CSplitterLine.ts \
 	src/layer/marker/Cursor.ts \
 	src/layer/vector/CanvasOverlay.ts \
 	src/canvas/sections/ScrollSection.ts \
@@ -483,7 +492,6 @@ COOL_JS_LST =\
 	src/control/Toolbar.js \
 	src/control/Signing.js \
 	src/control/Parts.js \
-	src/control/Scroll.js \
 	src/control/Styles.js \
 	src/control/Ruler.ts \
 	src/control/VRuler.ts \
@@ -601,7 +609,6 @@ COOL_JS_LST =\
 	src/slideshow/operation/SScale.ts \
 	src/slideshow/operation/STranslate.ts \
 	src/dom/PosAnimation.js \
-	src/map/anim/Map.PanAnimation.js \
 	src/dom/PosAnimation.Timer.js \
 	src/control/Control.Scroll.Annotation.js \
 	src/main.js
@@ -777,9 +784,9 @@ $(INTERMEDIATE_DIR)/admin-src.js: $(COOL_ADMIN_TS_JS) $(COOL_ADMIN_JS)
 
 $(INTERMEDIATE_DIR)/cool-src.js: tscompile.done $(call prereq_cool) $(COOL_JS_DST) $(abs_top_srcdir)/scripts/unocommands.py
 	@mkdir -p $(dir $@)
-	$(abs_top_srcdir)/scripts/unocommands.py --check $(abs_top_srcdir)
+	$(QUIET_UNOCOMMANDS) $(abs_top_srcdir)/scripts/unocommands.py --check $(abs_top_srcdir)
 	@printf "Checking for obsolete JS build intermediates in this makefile... "
-	@if ! test "z$(COOL_ASSERT_INTERSECT)" == "z"; then echo; echo "Error: please remove obsolete files:"; echo "$(COOL_ASSERT_INTERSECT)"; exit 1; else echo "clean"; fi
+	@if ! test "z$(COOL_ASSERT_INTERSECT)" = "z"; then echo; echo "Error: please remove obsolete files:"; echo "$(COOL_ASSERT_INTERSECT)"; exit 1; else echo "clean"; fi
 	$(call run_eslint_check,$(srcdir)/src $(srcdir)/js)
 	$(call run_prettier_check,--debug-check $(srcdir)/src $(srcdir)/js/global.js)
 	@echo "Bundling cool..."
@@ -787,8 +794,7 @@ $(INTERMEDIATE_DIR)/cool-src.js: tscompile.done $(call prereq_cool) $(COOL_JS_DS
 
 $(DIST_FOLDER)/bundle.css: $(call prereq_css)
 	@mkdir -p $(dir $@)
-	@echo "Checking for CSS errors..."
-	@$(NODE) node_modules/stylelint/bin/stylelint.js --config $(srcdir)/.stylelintrc.json $(srcdir)/css/*.css
+	$(QUIET_STYLELINT) $(NODE) node_modules/stylelint/bin/stylelint.js --config $(srcdir)/.stylelintrc.json $(srcdir)/css/*.css --fix
 	$(call bundle_css)
 
 $(DIST_FOLDER)/bundle.js: $(INTERMEDIATE_DIR)/cool-src.js $(call prereq_all)
@@ -971,6 +977,9 @@ pot:
 		admin/src/AdminSocketBase.js \
 		admin/src/AdminSocketOverview.js \
 		admin/src/AdminSocketSettings.js \
+		admin/src/integrator/AdminIntegratorSettings.ts \
+		admin/src/integrator/WordBook.ts \
+		admin/src/integrator/Xcu.ts \
 		admin/src/Util.js \
 		js/global.js \
 		src/app/Debug.ts \
@@ -1032,6 +1041,7 @@ pot:
 		src/control/jsdialog/Widget.HTMLContent.ts \
 		src/control/jsdialog/Widget.MobileBorderSelector.js \
 		src/control/jsdialog/Widget.SidebarContainers.ts \
+		src/control/jsdialog/Widget.TreeView.ts \
 		src/core/Socket.js \
 		src/docdispatcher.ts \
 		src/docstate.js \

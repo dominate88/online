@@ -11,9 +11,9 @@ ARG author
 LABEL author=${author:-"Collabora Productivity Ltd."}
 LABEL description="Collabora Online is a powerful collaborative Office suite that supports all major document, spreadsheet and presentation file formats, which you can integrate into your own infrastructure. Collabora Online provides data security and sovereignty, and is ideally suited to the demands of a modern distributed working environment. Delivering a familiar look and feel, Collabora Online represents a real alternative to other big-brands solutions, giving you control and flexibility."
 ARG releasenotes
-LABEL release.notes=${releasenotes:-"https://www.collaboraonline.com/code-24-04-release-notes/"}
+LABEL release.notes=${releasenotes:-"https://www.collaboraonline.com/code-25-04-release-notes/"}
 ARG version
-LABEL version=${version:-"24.04.1.3"}
+LABEL version=${version:-"25.04.1.1"}
 ARG coretag
 LABEL commit.history.core="https://git.libreoffice.org/core/+log/${coretag}"
 ARG onlinetag
@@ -53,7 +53,7 @@ RUN --mount=type=secret,id=secret_key \
         repourl="${repourl}24.04-key/"; \
     else \
         echo "Based on the provided build arguments Collabora Online Development Edition will be used."; \
-        repourl="${repourl}24.04-CODE/CODE-deb/"; \
+        repourl="${repourl}25.04-CODE/CODE-deb/"; \
     fi && \
     echo "deb [signed-by=/usr/share/keyrings/collaboraonline-release-keyring.gpg] ${repourl} /" > /etc/apt/sources.list.d/collabora.list && \
 # Download Collabora package signing key
@@ -124,8 +124,6 @@ RUN --mount=type=secret,id=secret_key \
     chown cool:cool /etc/coolwsd/coolwsd.xml && \
 # Fix ownership of config directory that will be modified on start of the container by cool user
     chown cool:cool /etc/coolwsd && \
-# Remove packages which were only needed for installation (dependecies of curl, gnupg, fc-cache etc.)
-    dpkg --purge --ignore-depends=apt-transport-https,cpio,curl,dirmngr,fontconfig,fontconfig-config,fonts-dejavu-core,gnupg,gnupg-l10n,gnupg-utils,gnupg2,gpg,gpg-agent,gpg-wks-client,gpg-wks-server,gpgconf,gpgsm,krb5-locales,libassuan0,libbrotli1,libcap2-bin,libcurl4,libexpat1,libfontconfig1,libfreetype6,libgpm2,libksba8,libldap-2.5-0,libldap-common,libncursesw6,libnghttp2-14,libnpth0,libpng16-16,libpsl5,libreadline8,librtmp1,libsasl2-2,libsasl2-modules,libsasl2-modules-db,libsqlite3-0,libssh2-1,libssl3,openssl,pinentry-curses,publicsuffix,readline-common apt-transport-https cpio curl dirmngr fontconfig-config fonts-dejavu-core fontconfig gnupg gnupg-l10n gnupg-utils gnupg2 gpg gpg-agent gpg-wks-client gpg-wks-server gpgconf gpgsm krb5-locales libassuan0 libbrotli1 libcap2-bin libcurl4 libexpat1 libfontconfig1 libfreetype6 libgpm2 libksba8 libldap-2.5-0 libldap-common libncursesw6 libnghttp2-14 libnpth0 libpng16-16 libpsl5 libreadline8 librtmp1 libsasl2-2 libsasl2-modules libsasl2-modules-db libsqlite3-0 libssh2-1 pinentry-curses publicsuffix readline-common && \
 # Remove perl-base, it's not needed and triggered some license scanner because of Paul Hsieh derivative license
     dpkg --purge  --force-remove-essential --ignore-depends=perl-base perl-base && \
 # Cleanup
